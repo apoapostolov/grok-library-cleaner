@@ -40,8 +40,8 @@
     includeOther: false,
     maxPerRun: 0,
     maxSizeMB: 0, // 0 = accept every size
-    downloadFirst: true, // save a copy before deleting
-    folder: 'GrokLibrary', // subfolder under the browser Downloads folder
+    downloadFirst: false, // opt in: save a copy before deleting
+    folder: '', // empty means straight into Downloads, no invented name
     savePrompts: true, // write a .md beside each file when a prompt exists
   };
 
@@ -116,8 +116,8 @@
       includeOther: s.includeOther === true,
       maxPerRun: num(s.maxPerRun, 0, 0, 50000),
       maxSizeMB: num(s.maxSizeMB, 0, 0, 4096),
-      downloadFirst: s.downloadFirst !== false,
-      folder: String(s.folder || '').trim() || 'GrokLibrary',
+      downloadFirst: s.downloadFirst === true,
+      folder: String(s.folder || '').trim(),
       savePrompts: s.savePrompts !== false,
     };
     if (settings.maxDelay < settings.minDelay) settings.maxDelay = settings.minDelay;
@@ -585,8 +585,8 @@
 
     const prompt = promptOf(meta);
     const base = baseNameOf(full, prompt);
-    const folder = String(settings.folder || 'GrokLibrary').replace(/^\/+|\/+$/g, '');
-    const dir = folder + '/' + base.slice(0, 10);
+    const folder = String(settings.folder || '').replace(/^\/+|\/+$/g, '');
+    const dir = (folder ? folder + '/' : '') + base.slice(0, 10);
     const file = base + '.' + extOf(full);
 
     try {
@@ -857,7 +857,7 @@
         (scanned.partial ? ' (partial)' : '') +
         (tooBig ? ' · skipping ' + fmtInt(tooBig) + ' over ' + settings.maxSizeMB + ' MB' : '') +
         (settings.downloadFirst
-          ? ' · saving to Downloads/' + settings.folder
+          ? ' · saving to ' + (settings.folder ? 'Downloads/' + settings.folder : 'Downloads')
           : ' · no copies saved'),
       actions: [
         {
@@ -1039,10 +1039,11 @@
       const base = baseNameOf(meta, prompt);
       const file = base + '.' + extOf(meta);
       const day = base.slice(0, 10);
+      const dir = (settings.folder ? settings.folder + '/' : '') + day;
       return {
         file,
-        path: settings.folder + '/' + day + '/' + file,
-        mdPath: prompt ? settings.folder + '/' + day + '/' + base + '.md' : null,
+        path: dir + '/' + file,
+        mdPath: prompt ? dir + '/' + base + '.md' : null,
         prompt,
         generation: genSummary(meta),
         md: prompt ? mdFor(meta, meta, prompt, file) : '',

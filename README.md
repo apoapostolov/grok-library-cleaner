@@ -13,7 +13,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-97ca00" alt="License: MIT"></a>
 </p>
 
-Grok keeps every image and video it generates, and clearing them on `grok.com/library` means a hover menu and a confirmation dialog for each one. This extension works the library in both directions. It saves copies to your disk, each with the prompt that made it, then deletes at a human pace: one tile at a time, or as a single confirmed sweep with a progress bar, a stop button and a size guard.
+Grok keeps every image and video it generates, and clearing them on `grok.com/library` means a hover menu and a confirmation dialog for each one. This extension works the library in both directions. Turn on saving and it writes each asset to disk with the prompt that made it, then deletes at a human pace: one tile at a time, or as a single confirmed sweep with a progress bar, a stop button and a size guard.
 
 That order is the point. You leave with your work instead of a folder of untitled renders, and the library gets empty without you clicking a menu fifteen thousand times.
 
@@ -41,7 +41,7 @@ git clone https://github.com/apoapostolov/grok-library-cleaner.git
 
 ## Keep a copy before it goes
 
-Copies land inside your browser's Downloads folder, in a folder name you set in the popup, sorted by creation day: `Downloads/GrokLibrary/2026-10-21/`.
+Saving is off until you turn it on, and the folder field starts empty. Name a folder and copies land sorted by creation day, for example `Downloads/GrokLibrary/2026-10-21/`. Leave the field empty and the day folders sit straight in Downloads, at `Downloads/2026-10-21/`.
 
 Files are named from the asset itself, so they read like a person filed them:
 
@@ -90,6 +90,7 @@ The extension has no backend and no analytics. It talks to `grok.com` for the li
 ## Notes
 
 - Deletion is permanent on Grok's side and there is no undo.
-- Do the save pass before the purge. Click **Test download** once, open the folder, then start the run.
+- Saving is opt in. Turn on **Save a copy before deleting**, click **Test download** once, open the folder, then start the purge.
+- The prompt `.md` files are on by default once saving is on, and can be switched off on their own.
 - Keep the library tab open while a run is in progress.
 - Not affiliated with xAI or Grok.

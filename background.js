@@ -45,7 +45,7 @@ async function saveAsset({ url, path, expectedSize, md, mdPath }) {
 /* Proves the download path end to end for the folder the user picked. */
 async function selfTest({ folder }) {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const path = (folder || 'GrokLibrary') + '/_selftest_' + stamp + '.txt';
+  const path = (folder ? folder + '/' : '') + '_selftest_' + stamp + '.txt';
   const res = await downloadText('Grok Library Cleaner: downloads work.\n', path);
   return res.ok ? { ok: true, path: res.filename, bytes: res.fileSize } : res;
 }

@@ -12,8 +12,8 @@ const DEFAULTS = {
   includeOther: false,
   maxPerRun: 0,
   maxSizeMB: 0,
-  downloadFirst: true,
-  folder: 'GrokLibrary',
+  downloadFirst: false,
+  folder: '',
   savePrompts: true,
 };
 
@@ -44,7 +44,21 @@ function cleanFolder(value) {
     .replace(/^[.\/\s]+|[.\/\s]+$/g, '')
     .replace(/\s+/g, ' ')
     .slice(0, 60);
-  return cleaned || DEFAULTS.folder;
+  return cleaned;
+}
+
+/* The folder and prompt fields only mean something while saving is on. */
+function syncSave(settings) {
+  const on = document.getElementById('downloadFirst').checked;
+  const folder = document.getElementById('folder');
+  const prompts = document.getElementById('savePrompts');
+  folder.disabled = !on;
+  prompts.disabled = !on;
+  folder.style.opacity = on ? '' : '0.45';
+  prompts.parentElement.style.opacity = on ? '' : '0.45';
+  if (settings) {
+    folder.value = on ? settings.folder || '' : folder.value;
+  }
 }
 
 function fill(settings) {
@@ -56,7 +70,8 @@ function fill(settings) {
   }
   for (const [key, id] of NUMBER_FIELDS) document.getElementById(id).value = s[key];
   for (const key of CHECKBOXES) document.getElementById(key).checked = s[key] !== false && s[key] === true;
-  document.getElementById('folder').value = s.folder || DEFAULTS.folder;
+  document.getElementById('folder').value = s.folder || '';
+  syncSave(s);
 }
 
 function read() {
@@ -79,13 +94,26 @@ function read() {
   return out;
 }
 
-chrome.storage.local.get('settings').then((v) => fill(v && v.settings));
+const store = (globalThis.chrome && chrome.storage && chrome.storage.local) || null;
+
+if (store) {
+  store.get('settings').then(
+    (v) => fill(v && v.settings),
+    () => fill(DEFAULTS)
+  );
+} else {
+  fill(DEFAULTS); // keeps the form usable when storage is unreachable
+}
 
 document.getElementById('save').addEventListener('click', async () => {
   const settings = read();
-  await chrome.storage.local.set({ settings });
-  fill(settings);
   const status = document.getElementById('status');
+  if (!store) {
+    status.textContent = 'Storage is unavailable in this context.';
+    return;
+  }
+  await store.set({ settings });
+  fill(settings);
   status.textContent = 'Saved. Applies to the open library tab.';
   setTimeout(() => {
     status.textContent = '';
@@ -99,6 +127,9 @@ for (const [, id] of NUMBER_FIELDS) {
 }
 
 /* Proves the download path really works for the chosen folder. */
+document.getElementById('downloadFirst').addEventListener('change', () => syncSave());
+syncSave();
+
 document.getElementById('selftest').addEventListener('click', async () => {
   const status = document.getElementById('status');
   const folder = cleanFolder(document.getElementById('folder').value);

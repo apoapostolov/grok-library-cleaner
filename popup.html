@@ -36,6 +36,7 @@
         font-size: 12px;
         text-align: center;
       }
+      input[type="text"]:disabled { cursor: not-allowed; }
       input[type="text"] {
         box-sizing: border-box;
         width: 100%;
@@ -148,11 +149,11 @@
 
     <div class="field">
       <span class="label">Save into this folder, inside Downloads</span>
-      <input id="folder" type="text" spellcheck="false" aria-label="Folder name inside the Downloads folder" />
+      <input id="folder" type="text" spellcheck="false" placeholder="(no subfolder)" aria-label="Folder name inside the Downloads folder, leave empty to save straight into Downloads" />
     </div>
 
     <div class="check" style="margin-top: 9px">
-      <input id="savePrompts" type="checkbox" />
+      <input id="savePrompts" type="checkbox" checked />
       <label for="savePrompts">Save the prompt as a .md beside each file</label>
     </div>
 
