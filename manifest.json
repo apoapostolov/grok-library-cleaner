@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "Grok Library Cleaner",
+  "version": "1.0",
+  "description": "Delete Grok library images in one click, or clear the whole library with a paced, confirmed sweep.",
+  "permissions": ["storage"],
+  "host_permissions": ["https://grok.com/*"],
+  "icons": {
+    "16": "assets/icon-16.png",
+    "32": "assets/icon-32.png",
+    "48": "assets/icon-48.png",
+    "128": "assets/icon-128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://grok.com/library*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "Grok Library Cleaner",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "assets/icon-16.png",
+      "32": "assets/icon-32.png"
+    }
+  }
+}

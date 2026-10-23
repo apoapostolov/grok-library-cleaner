@@ -1,0 +1,722 @@
+/*
+ * Grok Library Cleaner 1.0
+ *
+ * - Trash glyph on every library tile: one click deletes that asset immediately, no dialog.
+ * - "Delete all" in the Library header: scans the library, shows what it found, then purges
+ *   only the confirmed selection with human-paced, randomised spacing and a stop switch.
+ * - Four selectable classes: plain images (image.jpg), edited images (edited-image.jpg),
+ *   videos (generated_video.mp4) and other files.
+ *
+ * Endpoints (verified against the live site, logged-in session):
+ *   GET    /rest/assets?...                    -> {assets, nextPageToken}; pageSize caps at 60
+ *   DELETE /rest/assets-metadata/<assetId>     -> 200, removes the asset. This is the real delete.
+ *   POST   /rest/media/post/delete             -> always 404 for library assets; the app fires it
+ *                                                 first and ignores the failure. Do not rely on it.
+ *   Throttling: HTTP 429, gRPC code 8, no Retry-After header; window clears in ~15-40 s.
+ */
+(() => {
+  'use strict';
+  if (window.__grokLibraryCleaner) return;
+  window.__grokLibraryCleaner = true;
+
+  const TILE_BTN = 'button[data-library-item-id]';
+  // The real delete is a DELETE on the asset metadata. The app also fires
+  // POST /rest/media/post/delete first, which answers 404 for library assets and
+  // is ignored; doing only that call is why nothing was ever deleted.
+  const API_DELETE = '/rest/assets-metadata';
+  const API_LIST = '/rest/assets';
+  const PAGE_SIZE = '60';
+
+  const DEFAULTS = {
+    minDelay: 800,
+    maxDelay: 2400,
+    longPauseEveryMin: 6,
+    longPauseEveryMax: 14,
+    longPauseMin: 3500,
+    longPauseMax: 9000,
+    includePlain: true,
+    includeEdited: true,
+    includeVideos: false,
+    includeOther: false,
+    maxPerRun: 0,
+  };
+
+  let settings = { ...DEFAULTS };
+  let phase = 'idle'; // idle | scan | confirm | run
+  let stopRequested = false;
+  let armTimer = null;
+  let panelEl = null;
+
+  // ---------------------------------------------------------------- utils
+
+  const rand = (min, max) => min + Math.random() * (max - min);
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const num = (v, fallback, min, max) => {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.min(max, Math.max(min, n));
+  };
+  const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
+
+  const kindOf = (mime) => {
+    const m = String(mime || '');
+    if (m.startsWith('image/')) return 'image';
+    if (m.startsWith('video/')) return 'video';
+    return 'other';
+  };
+
+  /**
+   * Plain generated images are named "image.jpg", edited ones "edited-image.jpg".
+   * auxKeys.image_edit_is_root_user_uploaded is NOT a marker: it also appears on
+   * untouched image.jpg assets, so the file name is the only reliable signal.
+   */
+  const isEditedAsset = (asset) =>
+    kindOf(asset && asset.mimeType) === 'image' &&
+    /^edited[-_\s]/i.test(String((asset && asset.name) || ''));
+
+  const classOf = (asset) => {
+    const kind = kindOf(asset && asset.mimeType);
+    if (kind === 'image') return isEditedAsset(asset) ? 'edited' : 'plain';
+    return kind;
+  };
+
+  const fmtSeconds = (s) => {
+    if (!Number.isFinite(s) || s <= 0) return '0s';
+    const m = Math.floor(s / 60);
+    const sec = Math.round(s % 60);
+    return m ? m + 'm ' + sec + 's' : sec + 's';
+  };
+
+  const TRASH_SVG =
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" ' +
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/>' +
+    '<path d="M10 11v6"/><path d="M14 11v6"/></svg>';
+
+  // ------------------------------------------------------------- settings
+
+  function applySettings(raw) {
+    const s = raw || {};
+    settings = {
+      minDelay: num(s.minDelay, DEFAULTS.minDelay, 300, 60000),
+      maxDelay: num(s.maxDelay, DEFAULTS.maxDelay, 300, 120000),
+      longPauseEveryMin: num(s.longPauseEveryMin, DEFAULTS.longPauseEveryMin, 2, 200),
+      longPauseEveryMax: num(s.longPauseEveryMax, DEFAULTS.longPauseEveryMax, 2, 200),
+      longPauseMin: num(s.longPauseMin, DEFAULTS.longPauseMin, 1000, 300000),
+      longPauseMax: num(s.longPauseMax, DEFAULTS.longPauseMax, 1000, 600000),
+      // The pre 1.1 single "includeImages" flag meant both image classes.
+      includePlain: s.includePlain !== undefined ? s.includePlain === true : s.includeImages !== false,
+      includeEdited: s.includeEdited !== undefined ? s.includeEdited === true : s.includeImages !== false,
+      includeVideos: s.includeVideos === true,
+      includeOther: s.includeOther === true,
+      maxPerRun: num(s.maxPerRun, 0, 0, 50000),
+    };
+    if (settings.maxDelay < settings.minDelay) settings.maxDelay = settings.minDelay;
+    if (settings.longPauseEveryMax < settings.longPauseEveryMin) {
+      settings.longPauseEveryMax = settings.longPauseEveryMin;
+    }
+    if (settings.longPauseMax < settings.longPauseMin) settings.longPauseMax = settings.longPauseMin;
+  }
+
+  try {
+    chrome.storage.local.get('settings').then((v) => applySettings(v && v.settings), () => {});
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === 'local' && changes.settings) applySettings(changes.settings.newValue);
+    });
+  } catch (e) {
+    /* no extension storage context (manual injection for testing) */
+  }
+
+  // ---------------------------------------------------------- delete API
+
+  async function deleteOnce(id) {
+    const res = await fetch(API_DELETE + '/' + encodeURIComponent(id), {
+      method: 'DELETE',
+      credentials: 'include',
+    });
+    let body = null;
+    try {
+      body = await res.clone().json();
+    } catch (e) {
+      body = null;
+    }
+    return { status: res.status, ok: res.ok, retryAfter: res.headers.get('retry-after'), body };
+  }
+
+  async function deleteWithRetry(id) {
+    let attempt = 0;
+    while (attempt < 4) {
+      if (stopRequested) return { stopped: true };
+      let r;
+      try {
+        r = await deleteOnce(id);
+      } catch (e) {
+        await sleep(rand(1500, 3500) * Math.pow(1.6, attempt));
+        attempt += 1;
+        continue;
+      }
+      if (r.ok) return { ok: true };
+      // 404 means the asset is already gone, which is the outcome we want.
+      if (r.status === 404) return { ok: true, gone: true };
+      if (r.status === 401 || r.status === 403) return { auth: true, status: r.status };
+      if (r.status === 429) {
+        const ra = parseFloat(r.retryAfter || '0');
+        const wait = ra > 0 ? ra * 1000 : rand(18000, 32000) * Math.pow(1.5, attempt);
+        await sleep(Math.min(wait, 120000));
+        attempt += 1;
+        continue;
+      }
+      if (r.status >= 500) {
+        await sleep(Math.min(rand(1800, 4500) * Math.pow(1.6, attempt), 60000));
+        attempt += 1;
+        continue;
+      }
+      return { ok: false, status: r.status, body: r.body };
+    }
+    return { ok: false, status: 'retries exhausted' };
+  }
+
+  /**
+   * Enumerates the library newest-first. pageSize is capped server side at 60, so a 5000
+   * asset library costs roughly 85 sequential pages; each page rests, and every 429 is
+   * absorbed with a cooldown before the same page is retried.
+   */
+  async function listAllAssets(onProgress, stopWhen) {
+    const out = [];
+    let token = null;
+    let pages = 0;
+    let partial = false;
+    while (pages < 400) {
+      if (stopRequested) break;
+      const params = new URLSearchParams({
+        pageSize: PAGE_SIZE,
+        orderBy: 'ORDER_BY_CREATE_TIME',
+        sortDirection: 'SORT_DIRECTION_DESCENDING',
+        source: 'SOURCE_ANY',
+        isLatest: 'true',
+        includeImagineFiles: 'true',
+      });
+      if (token) params.set('pageToken', token);
+
+      let res = null;
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        if (stopRequested) return out;
+        res = await fetch(API_LIST + '?' + params.toString(), { credentials: 'include' });
+        if (res.status !== 429) break;
+        if (onProgress) onProgress({ pages, count: out.length, throttled: true });
+        await sleep(rand(18000, 32000) * Math.pow(1.35, attempt));
+      }
+      if (!res || !res.ok) throw new Error('asset list failed: HTTP ' + (res ? res.status : 'no response'));
+
+      const json = await res.json();
+      for (const a of json.assets || []) if (a && a.assetId) out.push(a);
+      token = json.nextPageToken || null;
+      pages += 1;
+      if (onProgress) onProgress({ pages, count: out.length });
+      if (stopWhen && stopWhen(out)) {
+        partial = true;
+        break;
+      }
+      if (token) await sleep(rand(1200, 2000));
+    }
+    // Exhausted the 400 page cap while the server still had more to give.
+    if (token && !partial) partial = true;
+    return { assets: out, pages, partial };
+  }
+
+  function selected(asset) {
+    const cls = classOf(asset);
+    if (cls === 'plain') return settings.includePlain;
+    if (cls === 'edited') return settings.includeEdited;
+    if (cls === 'video') return settings.includeVideos;
+    return settings.includeOther;
+  }
+
+  function classify(assets) {
+    const counts = { plain: 0, edited: 0, video: 0, other: 0 };
+    const chosen = { plain: 0, edited: 0, video: 0, other: 0 };
+    const targets = [];
+    for (const a of assets) {
+      if (!a || a.isDeleted) continue;
+      const cls = classOf(a);
+      counts[cls] += 1;
+      if (selected(a)) {
+        chosen[cls] += 1;
+        targets.push(a);
+      }
+    }
+    return { counts, chosen, targets };
+  }
+
+  function filtersLabel() {
+    const parts = [];
+    if (settings.includePlain) parts.push('images');
+    if (settings.includeEdited) parts.push('edited');
+    if (settings.includeVideos) parts.push('videos');
+    if (settings.includeOther) parts.push('files');
+    return parts.join(' + ') || 'nothing selected';
+  }
+
+  // ---------------------------------------------------------------- panel
+
+  function panel() {
+    if (panelEl && document.body.contains(panelEl)) return panelEl;
+    panelEl = document.createElement('div');
+    panelEl.className = 'glc-panel';
+    // Static markup only; library data is never interpolated into innerHTML.
+    panelEl.innerHTML =
+      '<div class="glc-panel-title"><span class="glc-panel-dot" data-state="idle"></span>' +
+      '<span class="glc-ptitle"></span></div><div class="glc-panel-body"></div>' +
+      '<div class="glc-panel-actions"></div>';
+    document.body.appendChild(panelEl);
+    return panelEl;
+  }
+
+  function hidePanel() {
+    if (panelEl) {
+      panelEl.remove();
+      panelEl = null;
+    }
+  }
+
+  function setPanel(opts) {
+    const el = panel();
+    const dot = el.querySelector('.glc-panel-dot');
+    dot.dataset.state = opts.state || 'idle';
+    el.querySelector('.glc-ptitle').textContent = opts.title || '';
+
+    const body = el.querySelector('.glc-panel-body');
+    body.textContent = '';
+    for (const [label, value] of opts.lines || []) {
+      const line = document.createElement('div');
+      line.className = 'glc-panel-line';
+      if (label) {
+        const strong = document.createElement('b');
+        strong.textContent = label + ' ';
+        line.appendChild(strong);
+      }
+      line.appendChild(document.createTextNode(String(value)));
+      body.appendChild(line);
+    }
+
+    const actions = el.querySelector('.glc-panel-actions');
+    actions.textContent = '';
+    for (const action of opts.actions || []) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'glc-panel-btn';
+      if (action.kind) btn.dataset.kind = action.kind;
+      btn.textContent = action.label;
+      btn.addEventListener('click', action.onClick);
+      actions.appendChild(btn);
+    }
+    actions.style.display = (opts.actions || []).length ? 'flex' : 'none';
+  }
+
+  function flashError(title, detail) {
+    setPanel({
+      state: 'idle',
+      title,
+      lines: detail ? [['', detail]] : [],
+      actions: [{ label: 'Dismiss', onClick: hidePanel }],
+    });
+    setTimeout(() => {
+      if (phase === 'idle') hidePanel();
+    }, 5000);
+  }
+
+  // ----------------------------------------------------------- tile glyph
+
+  function addGlyph(tileButton) {
+    const id = tileButton.getAttribute('data-library-item-id');
+    if (!id) return;
+    const tile = tileButton.parentElement;
+    if (!tile || tile.querySelector(':scope > .glc-glyph')) return;
+
+    const glyph = document.createElement('button');
+    glyph.type = 'button';
+    glyph.className = 'glc-glyph';
+    glyph.title = 'Delete (immediately)';
+    glyph.setAttribute('aria-label', 'Delete this item');
+    glyph.innerHTML = TRASH_SVG; // static constant
+
+    glyph.addEventListener(
+      'click',
+      async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (glyph.dataset.busy === '1') return;
+        glyph.dataset.busy = '1';
+        const res = await deleteWithRetry(id);
+        if (res.ok) {
+          hideTile(tile);
+          return;
+        }
+        glyph.dataset.busy = '0';
+        glyph.dataset.error = '1';
+        setTimeout(() => {
+          delete glyph.dataset.error;
+        }, 700);
+        if (res.auth) flashError('Session expired', 'Sign in to Grok again, then reload.');
+        else if (res.stopped) flashError('Cancelled', 'Nothing else was deleted.');
+        else flashError('Delete failed', 'HTTP ' + res.status + ' for ' + id.slice(0, 8) + '…');
+      },
+      true
+    );
+
+    tile.appendChild(glyph);
+  }
+
+  function hideTile(tile) {
+    tile.classList.add('glc-hidden');
+    setTimeout(() => tile.remove(), 220);
+  }
+
+  function removeTileById(id) {
+    const btn = document.querySelector(TILE_BTN + '[data-library-item-id="' + id + '"]');
+    if (btn && btn.parentElement) hideTile(btn.parentElement);
+  }
+
+  // --------------------------------------------------------- header button
+
+  function headerButton() {
+    return document.querySelector('.glc-header-btn');
+  }
+
+  function ensureHeaderButton() {
+    if (headerButton()) return;
+    const upload = Array.from(document.querySelectorAll('button')).find(
+      (b) => (b.textContent || '').trim() === 'Upload files'
+    );
+    if (!upload) return;
+    const group = upload.parentElement && upload.parentElement.parentElement;
+    if (!group) return;
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'glc-header-btn';
+    btn.textContent = 'Delete all';
+    btn.title = 'Scan the library, then delete what you confirm';
+    btn.addEventListener('click', onHeaderClick, true);
+    group.insertBefore(btn, group.firstChild);
+  }
+
+  function resetHeaderButton() {
+    const btn = headerButton();
+    if (!btn) return;
+    btn.dataset.armed = '0';
+    btn.dataset.running = '0';
+    btn.textContent = 'Delete all';
+    btn.disabled = false;
+  }
+
+  function onHeaderClick(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    const btn = headerButton();
+    if (!btn) return;
+
+    if (phase === 'run') {
+      stopRequested = true;
+      btn.textContent = 'Stopping…';
+      return;
+    }
+    if (phase === 'scan' || phase === 'confirm') {
+      cancelAll();
+      return;
+    }
+    if (btn.dataset.armed === '1') {
+      clearTimeout(armTimer);
+      btn.dataset.armed = '0';
+      startScan();
+      return;
+    }
+    btn.dataset.armed = '1';
+    btn.textContent = 'Click again: ' + filtersLabel();
+    armTimer = setTimeout(() => {
+      if (phase === 'idle') resetHeaderButton();
+    }, 5000);
+  }
+
+  function cancelAll() {
+    stopRequested = true;
+    phase = 'idle';
+    resetHeaderButton();
+    hidePanel();
+  }
+
+  // ------------------------------------------------------------------ scan
+
+  async function startScan() {
+    if (phase !== 'idle') return;
+    if (
+      !settings.includePlain &&
+      !settings.includeEdited &&
+      !settings.includeVideos &&
+      !settings.includeOther
+    ) {
+      flashError('Nothing selected', 'Turn on images, edited images, videos or files in the popup.');
+      return;
+    }
+
+    phase = 'scan';
+    stopRequested = false;
+    const btn = headerButton();
+    if (btn) {
+      btn.dataset.running = '1';
+      btn.textContent = 'Scanning…';
+    }
+
+    const stopAction = { label: 'Cancel', kind: 'danger', onClick: cancelAll };
+
+    let scanned;
+    const limit = settings.maxPerRun;
+    try {
+      scanned = await listAllAssets(
+        (p) => {
+          setPanel({
+            state: 'run',
+            title: p.throttled ? 'Throttled, cooling down' : 'Scanning library',
+            lines: [
+              ['Pages', String(p.pages)],
+              ['Assets', String(p.count)],
+              ['', p.throttled ? 'HTTP 429, waiting ~20-30s' : 'walking page tokens'],
+            ],
+            actions: [stopAction],
+          });
+        },
+        limit > 0 ? (arr) => classify(arr).targets.length >= limit : null
+      );
+    } catch (e) {
+      phase = 'idle';
+      resetHeaderButton();
+      setPanel({
+        state: 'idle',
+        title: 'Could not read the library',
+        lines: [['', String((e && e.message) || e)]],
+        actions: [{ label: 'Dismiss', onClick: hidePanel }],
+      });
+      return;
+    }
+
+    if (stopRequested) {
+      cancelAll();
+      return;
+    }
+
+    const assets = scanned.assets;
+    const { counts, chosen, targets } = classify(assets);
+    let queue = targets;
+    if (settings.maxPerRun > 0 && queue.length > settings.maxPerRun) {
+      queue = queue.slice(0, settings.maxPerRun);
+    }
+
+    const mix =
+      'images ' +
+      counts.plain +
+      ' · edited ' +
+      counts.edited +
+      ' · videos ' +
+      counts.video +
+      ' · files ' +
+      counts.other;
+    const chosenMix =
+      'images ' +
+      chosen.plain +
+      ' · edited ' +
+      chosen.edited +
+      ' · videos ' +
+      chosen.video +
+      ' · files ' +
+      chosen.other;
+
+    phase = 'confirm';
+    if (btn) btn.textContent = 'Awaiting confirm';
+
+    if (!queue.length) {
+      phase = 'idle';
+      resetHeaderButton();
+      setPanel({
+        state: 'done',
+        title: 'Nothing to delete',
+        lines: [
+          ['Library', mix],
+          ['Filters', filtersLabel()],
+          ['Selected', 'none, check the popup filters'],
+        ],
+        actions: [{ label: 'Close', onClick: hidePanel }],
+      });
+      return;
+    }
+
+    setPanel({
+      state: 'run',
+      title: 'Ready to delete',
+      lines: [
+        ['Queue', plural(queue.length, 'item', 'items')],
+        ['Contains', chosenMix],
+        ['Library', mix],
+        ['Filters', filtersLabel()],
+        ['Scanned', plural(assets.length, 'asset', 'assets') + ' · ' + plural(scanned.pages, 'page', 'pages') + (scanned.partial ? ' · partial' : '')],
+      ],
+      actions: [
+        {
+          label: 'Delete ' + queue.length,
+          kind: 'danger',
+          onClick: () => {
+            phase = 'run';
+            runDeletion(queue, mix);
+          },
+        },
+        { label: 'Cancel', onClick: cancelAll },
+      ],
+    });
+  }
+
+  // ---------------------------------------------------------------- delete
+
+  async function runDeletion(queue, mix) {
+    const btn = headerButton();
+    if (btn) {
+      btn.dataset.running = '1';
+      btn.textContent = 'Stop';
+    }
+
+    const startedAt = Date.now();
+    let deleted = 0;
+    let failed = 0;
+    let authStopped = false;
+    const total = queue.length;
+
+    const stopAction = { label: 'Stop', kind: 'danger', onClick: () => (stopRequested = true) };
+
+    const render = () => {
+      const elapsed = (Date.now() - startedAt) / 1000;
+      const doneCount = deleted + failed;
+      const remaining = total - doneCount;
+      const perItem = doneCount > 0 ? elapsed / doneCount : 0;
+      setPanel({
+        state: 'run',
+        title: stopRequested ? 'Stopping…' : 'Deleting library',
+        lines: [
+          ['Progress', deleted + ' / ' + total + ' deleted'],
+          ['Failed', String(failed)],
+          ['Remaining', String(remaining)],
+          ['Elapsed', fmtSeconds(elapsed)],
+          ['ETA', doneCount > 2 ? '~' + fmtSeconds(perItem * remaining) : 'estimating…'],
+        ],
+        actions: stopRequested ? [] : [stopAction],
+      });
+    };
+
+    render();
+    await sleep(rand(400, 1200));
+
+    let nextLongAt = Math.round(rand(settings.longPauseEveryMin, settings.longPauseEveryMax));
+
+    for (let i = 0; i < queue.length; i += 1) {
+      if (stopRequested) break;
+      const asset = queue[i];
+      const res = await deleteWithRetry(asset.assetId);
+
+      if (res.stopped) break;
+      if (res.auth) {
+        authStopped = true;
+        break;
+      }
+      if (res.ok) {
+        deleted += 1;
+        removeTileById(asset.assetId);
+      } else {
+        failed += 1;
+      }
+      render();
+
+      if (i + 1 < queue.length && !stopRequested) {
+        if ((i + 1) % nextLongAt === 0) {
+          await sleep(rand(settings.longPauseMin, settings.longPauseMax));
+          nextLongAt = i + 1 + Math.round(rand(settings.longPauseEveryMin, settings.longPauseEveryMax));
+        } else {
+          let wait = rand(settings.minDelay, settings.maxDelay);
+          if (Math.random() < 0.1) wait += rand(200, 900);
+          await sleep(wait);
+        }
+      }
+    }
+
+    phase = 'idle';
+    const elapsed = Math.round((Date.now() - startedAt) / 1000);
+    if (btn) {
+      btn.dataset.running = '0';
+      btn.dataset.armed = '0';
+      btn.textContent = 'Delete all';
+    }
+
+    setPanel({
+      state: authStopped ? 'idle' : 'done',
+      title: authStopped ? 'Stopped: session expired' : stopRequested ? 'Stopped' : 'Done',
+      lines: [
+        ['Deleted', String(deleted)],
+        ['Failed', String(failed)],
+        ['Not attempted', String(Math.max(0, total - deleted - failed))],
+        ['Time', fmtSeconds(elapsed)],
+        ['Library mix', mix],
+      ],
+      actions: [
+        { label: 'Reload library', onClick: () => location.reload() },
+        { label: 'Close', onClick: hidePanel },
+      ],
+    });
+  }
+
+  // --------------------------------------------------------------- wiring
+
+  function decorate() {
+    document.querySelectorAll(TILE_BTN).forEach(addGlyph);
+    ensureHeaderButton();
+  }
+
+  let scheduled = false;
+  function scheduleDecorate() {
+    if (scheduled) return;
+    scheduled = true;
+    requestAnimationFrame(() => {
+      scheduled = false;
+      decorate();
+    });
+  }
+
+  const observer = new MutationObserver(scheduleDecorate);
+  observer.observe(document.body, { childList: true, subtree: true });
+
+  // Safety net for scroll-restored rows the observer can miss.
+  setInterval(decorate, 1500);
+
+  decorate();
+
+  // Console hook so the pipeline can be exercised without the extension host.
+  window.__grokLibraryCleanerApi = {
+    list: listAllAssets,
+    preview: async () => {
+      const res = await listAllAssets();
+      const { counts, chosen, targets } = classify(res.assets);
+      return {
+        scanned: res.assets.length,
+        pages: res.pages,
+        partial: res.partial,
+        counts,
+        chosen,
+        queue: targets.length,
+        filters: filtersLabel(),
+      };
+    },
+    configure: (patch) => {
+      applySettings({ ...settings, ...(patch || {}) });
+      return { ...settings };
+    },
+    start: startScan,
+    stop: cancelAll,
+    settings: () => settings,
+    decorate,
+  };
+})();

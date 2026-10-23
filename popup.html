@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0;
+        width: 280px;
+        padding: 14px;
+        background: #141417;
+        color: #f2f2f4;
+        font: 13px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      h1 { font-size: 13px; margin: 0 0 2px; font-weight: 650; }
+      p.hint { margin: 0 0 12px; color: #9a9aa3; font-size: 12px; }
+      label { display: block; margin: 10px 0 4px; color: #b7b7bf; font-size: 12px; }
+      .row { display: flex; align-items: center; gap: 6px; }
+      input[type="number"] {
+        flex: 1;
+        min-width: 0;
+        height: 28px;
+        padding: 0 8px;
+        border-radius: 8px;
+        border: 1px solid #2e2e34;
+        background: #1c1c21;
+        color: #f2f2f4;
+        font: inherit;
+      }
+      input[type="checkbox"] { width: 14px; height: 14px; accent-color: #d93a3f; }
+      .check { display: flex; align-items: center; gap: 8px; margin-top: 12px; color: #d8d8de; }
+      button {
+        width: 100%;
+        margin-top: 14px;
+        height: 32px;
+        border-radius: 9px;
+        border: 1px solid #3a3a42;
+        background: #232329;
+        color: #fff;
+        font: 600 12.5px/1 inherit;
+        cursor: pointer;
+      }
+      button:hover { background: #2c2c34; }
+      #status { margin-top: 8px; font-size: 11.5px; color: #6fcf97; min-height: 14px; }
+    </style>
+  </head>
+  <body>
+    <h1>Grok Library Cleaner</h1>
+    <p class="hint">Pick what Delete all touches, and how fast it works. Timing is randomised per item.</p>
+
+    <label for="minDelay">Gap min (ms)</label>
+    <div class="row"><input id="minDelay" type="number" min="300" step="50" /></div>
+
+    <label for="maxDelay">Gap max (ms)</label>
+    <div class="row"><input id="maxDelay" type="number" min="300" step="50" /></div>
+
+    <label for="every">Long break every N–M items</label>
+    <div class="row">
+      <input id="every" type="number" min="2" step="1" />
+      <input id="everyMax" type="number" min="2" step="1" />
+    </div>
+
+    <label for="pause">Long break min / max (ms)</label>
+    <div class="row">
+      <input id="pause" type="number" min="1000" step="250" />
+      <input id="pauseMax" type="number" min="1000" step="250" />
+    </div>
+
+    <div class="check">
+      <input id="includePlain" type="checkbox" />
+      <label for="includePlain" style="margin: 0">Images (image.jpg)</label>
+    </div>
+    <div class="check">
+      <input id="includeEdited" type="checkbox" />
+      <label for="includeEdited" style="margin: 0">Edited images (edited-image.jpg)</label>
+    </div>
+    <div class="check">
+      <input id="includeVideos" type="checkbox" />
+      <label for="includeVideos" style="margin: 0">Videos (generated_video.mp4)</label>
+    </div>
+    <div class="check">
+      <input id="includeOther" type="checkbox" />
+      <label for="includeOther" style="margin: 0">Other files</label>
+    </div>
+
+    <label for="maxPerRun">Max per run (0 = no limit)</label>
+    <div class="row"><input id="maxPerRun" type="number" min="0" step="10" /></div>
+
+    <button id="save">Save</button>
+    <div id="status"></div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
