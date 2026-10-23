@@ -512,7 +512,7 @@
     return bits.join(' · ');
   }
 
-  /* the saved file name */
+  /* 2026-10-18_2143-07_image_sunlit-portrait-unbuttoned-linen-shirt_7c41ba2e.jpg */
   function baseNameOf(asset, prompt) {
     const stamp = stampOf(asset.createTime);
     const kind = fileKindOf(asset);
