@@ -4,7 +4,7 @@
 
 <h1 align="center">Grok Library Cleaner</h1>
 
-<p align="center">Before unsubscribing from Grok, remember to download and wipe out your creations.</p>
+<p align="center">Before deleting your account and leaving Grok, download your creations and then clear them out.</p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/type-chrome_extension-4285F4" alt="Type: Chrome extension">
@@ -13,7 +13,9 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-97ca00" alt="License: MIT"></a>
 </p>
 
-Grok keeps every image it generates. Removing them on `grok.com/library` means opening a hover menu and clicking through a confirmation dialog for each one. This extension adds a delete glyph to the corner of every tile, plus a **Delete all** button in the library header that scans the library, shows you exactly what it found, and then works through the queue at a human pace.
+Grok keeps every image and video it generates, and clearing them on `grok.com/library` means a hover menu and a confirmation dialog for each one. This extension works the library in both directions. It saves copies to your disk, each with the prompt that made it, then deletes at a human pace: one tile at a time, or as a single confirmed sweep with a progress bar, a stop button and a size guard.
+
+That order is the point. You leave with your work instead of a folder of untitled renders, and the library gets empty without you clicking a menu fifteen thousand times.
 
 ## Install
 
@@ -27,9 +29,11 @@ git clone https://github.com/apoapostolov/grok-library-cleaner.git
 
 ## What you get
 
+**Save first.** With **Save a copy before deleting** on, every asset is written to disk before its delete request is sent, and a matching `.md` holds the prompt plus model, mode, aspect ratio and dimensions. A file that fails to save is never deleted, so a bad path or a full disk cannot cost you an image.
+
 **Per-item delete.** A 26px trash glyph in the top-right corner of every tile. One click removes that asset. No menu, no dialog, and a toast in the bottom-right confirms which file went.
 
-**Delete all.** Two clicks to arm, then a scan of the whole library and a confirm toast showing the queue size and per-class breakdown. Nothing is deleted until you press **Delete N**. During the run the toast carries a live progress bar with the count, failures, elapsed time and ETA, plus a **Stop** button. Progress bar and counts are formatted, so 15,059 does not read as 15059.
+**Delete all.** Two clicks to arm, then a scan of the whole library and a confirm toast showing the queue size and per-class breakdown. Nothing is deleted until you press **Delete N**. During the run the toast carries a live progress bar with the count, failures, elapsed time and ETA, plus a **Stop** button. Every run can be stopped between items.
 
 **Separate selectors** for images (`image.jpg`), edited images (`edited-image.jpg`), videos (`generated_video.mp4`) and other files, with an optional per-run cap for a first pass on a large library.
 
@@ -37,7 +41,7 @@ git clone https://github.com/apoapostolov/grok-library-cleaner.git
 
 ## Keep a copy before it goes
 
-Turn on **Save a copy before deleting** and every item is downloaded to disk before its delete request is sent. The folder is set in the popup and lives inside your browsers Downloads folder, for example `Downloads/GrokLibrary/2026-10-21/`.
+Copies land inside your browser's Downloads folder, in a folder name you set in the popup, sorted by creation day: `Downloads/GrokLibrary/2026-10-21/`.
 
 Files are named from the asset itself, so they read like a person filed them:
 
@@ -86,5 +90,6 @@ The extension has no backend and no analytics. It talks to `grok.com` for the li
 ## Notes
 
 - Deletion is permanent on Grok's side and there is no undo.
+- Do the save pass before the purge. Click **Test download** once, open the folder, then start the run.
 - Keep the library tab open while a run is in progress.
 - Not affiliated with xAI or Grok.
