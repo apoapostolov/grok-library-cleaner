@@ -20,7 +20,7 @@
   "content_scripts": [
     {
       "matches": [
-        "https://grok.com/library*"
+        "https://grok.com/*"
       ],
       "js": [
         "content.js"

@@ -140,6 +140,27 @@
     /* no extension storage context (manual injection for testing) */
   }
 
+  /* The popup starts runs from any Grok tab, so the page answers these two. */
+  try {
+    chrome.runtime.onMessage.addListener((msg, sender, reply) => {
+      if (!msg || !msg.type) return;
+      if (msg.type === 'glc-ping') {
+        reply({ ok: true, phase });
+        return;
+      }
+      if (msg.type === 'glc-start') {
+        if (phase !== 'idle') {
+          reply({ ok: false, error: 'A run is already in progress in this tab.' });
+          return;
+        }
+        startScan();
+        reply({ ok: true });
+      }
+    });
+  } catch (e) {
+    /* no runtime in manual injection */
+  }
+
   // ---------------------------------------------------------- delete API
 
   const API_CONVERSATIONS = '/rest/app-chat/conversations';

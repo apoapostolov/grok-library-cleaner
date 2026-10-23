@@ -134,6 +134,36 @@ for (const [, id] of NUMBER_FIELDS) {
 document.getElementById('downloadFirst').addEventListener('change', () => syncSave());
 syncSave();
 
+/* Hands the run to the service worker, which finds or opens a Grok tab. */
+document.getElementById('delall').addEventListener('click', async () => {
+  const status = document.getElementById('status');
+  const settings = read();
+  const anyType =
+    settings.removeSessions ||
+    settings.removeProjects ||
+    settings.includePlain ||
+    settings.includeEdited ||
+    settings.includeVideos ||
+    settings.includeOther;
+  if (!anyType) {
+    status.textContent = 'Turn on at least one type first.';
+    return;
+  }
+  if (store) await store.set({ settings });
+  fill(settings);
+  status.textContent = 'Starting in your Grok tab…';
+  try {
+    const res = await chrome.runtime.sendMessage({ type: 'glc-run-all' });
+    if (res && res.ok) {
+      status.textContent = 'Scanning in your Grok tab. Confirm there.';
+    } else {
+      status.textContent = 'Could not start: ' + ((res && res.error) || 'no answer from the extension');
+    }
+  } catch (err) {
+    status.textContent = 'Could not start: ' + String((err && err.message) || err);
+  }
+});
+
 document.getElementById('selftest').addEventListener('click', async () => {
   const status = document.getElementById('status');
   const folder = cleanFolder(document.getElementById('folder').value);

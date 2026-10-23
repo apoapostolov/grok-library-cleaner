@@ -20,7 +20,7 @@ Chats and projects are two more removal types in the same popup, both off by def
 That order is the point. You leave with your work instead of a folder of untitled renders, and the library gets empty without you clicking a menu fifteen thousand times.
 
 <p align="center">
-  <img src="assets/popup.png" width="306" alt="Grok Library Cleaner settings popup: wait and break pacing, per-run and size caps, type filters, and the save-copy options with a folder name and prompt sidecars">
+  <img src="assets/popup.png" width="306"  alt="Grok Library Cleaner settings popup: wait and break pacing, per-run and size caps, type filters, and the save-copy options with a folder name and prompt sidecars">
 </p>
 
 <p align="center"><sub>The settings popup at its real size, with saving turned on.</sub></p>
@@ -42,6 +42,8 @@ git clone https://github.com/apoapostolov/grok-library-cleaner.git
 **Save first.** With **Save a copy before deleting** on, every asset is written to disk before its delete request is sent, and a matching `.md` holds the prompt plus model, mode, aspect ratio and dimensions. A file that fails to save is never deleted, so a bad path or a full disk cannot cost you an image.
 
 **Per-item delete.** A 26px trash glyph in the top-right corner of every tile. One click removes that asset. No menu, no dialog, and a toast in the bottom-right confirms which file went.
+
+**Delete all from the popup.** The same button also lives in the settings popup, above Save, so you never have to be on the library page. It finds an open Grok tab and starts the run there; if none is open it opens the library first. The scan, the confirm and the progress bar all live in the tab, so the run keeps its toast and its Stop button where you can see them. If a run is already going in that tab, the popup says so instead of starting a second one.
 
 **Delete all.** Two clicks to arm, then a scan of the whole library and a confirm toast showing the queue size and per-class breakdown. Nothing is deleted until you press **Delete N**. During the run the toast carries a live progress bar with the count, failures, elapsed time and ETA, plus a **Stop** button. Every run can be stopped between items.
 
@@ -104,6 +106,7 @@ The extension has no backend and no analytics. It talks to `grok.com` for the li
 
 ## Notes
 
+- The content script runs on every `grok.com` page, not just the library, because the popup can start a run from any Grok tab. On a page without a library grid it decorates nothing and adds no button.
 - Deletion is permanent on Grok's side and there is no undo, for chats and projects as much as for images.
 - Deleting a project removes the project. What Grok does with the chats inside it is Grok's behaviour, and the extension does not know in advance.
 - Saving is opt in. Turn on **Save a copy before deleting**, click **Test download** once, open the folder, then start the purge.

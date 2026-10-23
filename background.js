@@ -13,13 +13,80 @@
 const TIMEOUT_MS = 10 * 60 * 1000;
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  if (!msg || (msg.type !== 'glc-save' && msg.type !== 'glc-selftest')) return false;
-  const work = msg.type === 'glc-selftest' ? selfTest(msg) : saveAsset(msg);
+  if (!msg) return false;
+  const known = msg.type === 'glc-save' || msg.type === 'glc-selftest' || msg.type === 'glc-run-all';
+  if (!known) return false;
+  const work =
+    msg.type === 'glc-run-all'
+      ? startRunInGrokTab()
+      : msg.type === 'glc-selftest'
+        ? selfTest(msg)
+        : saveAsset(msg);
   work
     .then((res) => sendResponse(res))
     .catch((err) => sendResponse({ ok: false, error: String((err && err.message) || err) }));
   return true; // keep the channel open for the async reply
 });
+
+/* ---------------------------------------------------------------------
+ * Runs started from the popup.
+ *
+ * The scan and the deletes live in the content script, because they need the
+ * page's cookie session and the on-page toast. So the popup's Delete all only
+ * wakes a Grok tab: an open one is preferred, otherwise the library is opened.
+ * --------------------------------------------------------------------- */
+
+const GROK_ORIGIN = 'https://grok.com/';
+
+async function findGrokTab() {
+  const tabs = await chrome.tabs.query({ url: 'https://grok.com/*' });
+  if (!tabs || !tabs.length) return null;
+  return tabs.find((t) => t.active) || tabs[0];
+}
+
+/* A freshly opened tab needs a moment before its content script answers. */
+function waitForContentScript(tabId, tries = 24, gap = 500) {
+  return new Promise((resolve) => {
+    let attempt = 0;
+    const tick = () => {
+      chrome.tabs.sendMessage(tabId, { type: 'glc-ping' }, (res) => {
+        if (chrome.runtime.lastError) {
+          // no listener yet; expected while the page is still booting
+        }
+        if (res && res.ok) return resolve(true);
+        attempt += 1;
+        if (attempt >= tries) return resolve(false);
+        setTimeout(tick, gap);
+      });
+    };
+    tick();
+  });
+}
+
+async function startRunInGrokTab() {
+  let tab = await findGrokTab();
+  let opened = false;
+  if (!tab) {
+    tab = await chrome.tabs.create({ url: GROK_ORIGIN + 'library', active: true });
+    opened = true;
+  }
+  const ready = await waitForContentScript(tab.id);
+  if (!ready) {
+    return { ok: false, error: 'The Grok tab did not answer. Reload it and try again.' };
+  }
+  if (opened) {
+    await chrome.tabs.update(tab.id, { active: true });
+  }
+  return new Promise((resolve) => {
+    chrome.tabs.sendMessage(tab.id, { type: 'glc-start' }, (res) => {
+      if (chrome.runtime.lastError) {
+        resolve({ ok: false, error: chrome.runtime.lastError.message });
+        return;
+      }
+      resolve(res || { ok: false, error: 'No answer from the page.' });
+    });
+  });
+}
 
 async function saveAsset({ url, path, expectedSize, md, mdPath }) {
   if (!url || !path) return { ok: false, error: 'missing url or path' };
