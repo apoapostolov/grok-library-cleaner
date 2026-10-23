@@ -7,7 +7,8 @@ crisp at 16px and at 512px without shipping an SVG rasteriser dependency.
 """
 
 from pathlib import Path
-from PIL import Image, ImageDraw
+from PIL import Image, ImageChops, ImageDraw
+import math
 
 ROOT = Path(__file__).resolve().parent.parent
 ASSETS = ROOT / "assets"
@@ -107,19 +108,105 @@ def draw_photo(d, box, radius, color, width, hill=True):
     )
 
 
-def variant_a(size=512, glyph=0.56, radius_ratio=0.26):
-    """Recommended: trash can, red lid, white body."""
-    img = _rounded_bg(size, radius_ratio=radius_ratio)
-    d = ImageDraw.Draw(img)
-    draw_trash(
-        d,
-        cx=size * SS / 2,
-        cy=size * SS * 0.50,
-        h=size * SS * glyph,
-        color=WHITE + (255,),
-        lid_color=RED + (255,),
+def _place(layer, size, coverage):
+    """Crop the mark to its ink bbox, scale to `coverage` of the canvas, centre it."""
+    n = layer.size[0]
+    bb = layer.split()[3].getbbox()
+    if not bb:
+        return layer
+    x0, y0, x1, y1 = bb
+    mw, mh = x1 - x0, y1 - y0
+    scale = (coverage * n) / max(mw, mh)
+    crop = layer.crop(bb).resize((max(1, int(mw * scale)), max(1, int(mh * scale))), Image.LANCZOS)
+    out = Image.new("RGBA", (n, n), (0, 0, 0, 0))
+    out.paste(crop, ((n - crop.width) // 2, (n - crop.height) // 2), crop)
+    return out
+
+
+def _dumped_x_bin(size, glyph=0.62, radius_ratio=0.26, coverage=0.74):
+    """A white bin with a red X going into it.
+
+    Depth is sold in three passes: the mouth is a dark inset under the rim, the X is
+    clipped just inside that mouth, and the dark mouth is then re-applied over the X
+    before the rim is stroked in front of it, so the lower part of the X sits in
+    shadow behind the near edge.
+    """
+    n = size * SS
+    mark = Image.new("RGBA", (n, n), (0, 0, 0, 0))
+    d = ImageDraw.Draw(mark)
+
+    cx = n * 0.5
+    h = n * glyph
+    w = h * 0.74
+    sw = max(2, int(h * 0.085))
+    body_top = n * 0.42
+    body_bottom = body_top + h * 0.66
+    half_top, half_bottom = w * 0.5, w * 0.41
+
+    body = [
+        (cx - half_top, body_top),
+        (cx + half_top, body_top),
+        (cx + half_bottom, body_bottom),
+        (cx - half_bottom, body_bottom),
+    ]
+    mouth = [
+        (cx - half_top * 0.86, body_top + sw * 0.55),
+        (cx + half_top * 0.86, body_top + sw * 0.55),
+        (cx + half_bottom * 0.86, body_top + h * 0.24),
+        (cx - half_bottom * 0.86, body_top + h * 0.24),
+    ]
+
+    # mouth interior
+    d.polygon(mouth, fill=(7, 8, 11, 255))
+
+    # red X, straddling the rim
+    x_layer = Image.new("RGBA", (n, n), (0, 0, 0, 0))
+    xd = ImageDraw.Draw(x_layer)
+    arm = h * 0.29
+    xw = max(2, int(h * 0.13))
+    xcx, xcy = cx, body_top - h * 0.14
+    a = math.radians(0.0)
+    for sx, sy in ((1, 1), (1, -1)):
+        dx, dy = arm * sx, arm * sy
+        rx = dx * math.cos(a) - dy * math.sin(a)
+        ry = dx * math.sin(a) + dy * math.cos(a)
+        xd.line([(xcx - rx, xcy - ry), (xcx + rx, xcy + ry)], fill=RED + (255,), width=xw, joint="curve")
+        for ex, ey in ((xcx - rx, xcy - ry), (xcx + rx, xcy + ry)):
+            r = xw / 2
+            xd.ellipse([ex - r, ey - r, ex + r, ey + r], fill=RED + (255,))
+
+    # keep the part that has entered the mouth visible, everything deeper is hidden
+    clip = Image.new("L", (n, n), 0)
+    cd = ImageDraw.Draw(clip)
+    cd.rectangle([0, 0, n, int(body_top)], fill=255)
+    cd.polygon(mouth, fill=255)
+    mark.paste(x_layer, (0, 0), ImageChops.multiply(x_layer.split()[3], clip))
+
+    # shadow over whatever fell inside, then the rim stroke in front
+    d.polygon(mouth, fill=(7, 8, 11, 70))
+    d.line(body + [body[0]], fill=WHITE + (255,), width=sw, joint="curve")
+    d.line(
+        [(cx - half_top, body_top), (cx + half_top, body_top)],
+        fill=WHITE + (255,),
+        width=sw,
     )
-    return img
+
+    # body ribs, below the mouth, so the bin keeps its read at 16px
+    for off in (-0.17, 0.17):
+        d.line(
+            [(cx + w * off, body_top + h * 0.36), (cx + w * off * 0.94, body_bottom - h * 0.13)],
+            fill=MUTED + (255,),
+            width=max(1, int(sw * 0.75)),
+        )
+
+    card = _rounded_bg(size, radius_ratio=radius_ratio)
+    card.alpha_composite(_place(mark, size, coverage))
+    return card
+
+
+def variant_a(size=512, glyph=0.62, radius_ratio=0.26, coverage=0.74):
+    """Recommended: white bin with a red X going in."""
+    return _dumped_x_bin(size, glyph=glyph, radius_ratio=radius_ratio, coverage=coverage)
 
 
 def variant_b(size=512):
@@ -183,10 +270,10 @@ def main():
     # Extension sizes get their own geometry: a downscaled padded master leaves the
     # glyph only ~6px wide at 16px, so the small sizes are drawn with a fuller mark.
     sizes = {
-        16: dict(glyph=0.76, radius_ratio=0.22),
-        32: dict(glyph=0.70, radius_ratio=0.24),
-        48: dict(glyph=0.64, radius_ratio=0.25),
-        128: dict(glyph=0.58, radius_ratio=0.26),
+        16: dict(glyph=0.72, radius_ratio=0.22, coverage=0.82),
+        32: dict(glyph=0.66, radius_ratio=0.24, coverage=0.80),
+        48: dict(glyph=0.60, radius_ratio=0.25, coverage=0.78),
+        128: dict(glyph=0.56, radius_ratio=0.26, coverage=0.75),
     }
     for px, kw in sizes.items():
         img = variant_a(px, **kw).resize((px, px), Image.LANCZOS)
