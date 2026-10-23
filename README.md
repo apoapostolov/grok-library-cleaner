@@ -17,6 +17,12 @@ Grok keeps every image and video it generates, and clearing them on `grok.com/li
 
 That order is the point. You leave with your work instead of a folder of untitled renders, and the library gets empty without you clicking a menu fifteen thousand times.
 
+<p align="center">
+  <img src="assets/popup.png" width="308" alt="Grok Library Cleaner settings popup: wait and break pacing, per-run and size caps, type filters, and the save-copy options with a folder name and prompt sidecars">
+</p>
+
+<p align="center"><sub>The settings popup, at its real size.</sub></p>
+
 ## Install
 
 ```bash
