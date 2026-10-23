@@ -54,6 +54,7 @@ Files are named from the asset itself, so they read like a person filed them:
 ```
 2026-10-18_2143-07_image_sunlit-portrait-unbuttoned-linen-shirt_7c41ba2e.jpg
 2026-10-14_1912-55_edit_warmer-golden-hour-bare-shoulder_52d90f6b.jpg
+2026-10-09_1136-42_video_slow-pan-summer-dress-in-the-breeze_9ab3e810.mp4
 ```
 
 That is the creation timestamp in local time, the kind (image, edit, video, file), a slug of the prompt, and the first eight characters of the asset id so a duplicate can always be traced back.
