@@ -6,7 +6,7 @@
       :root { color-scheme: dark; }
       body {
         margin: 0;
-        width: 360px;
+        width: 280px;
         padding: 14px;
         background: #141417;
         color: #f2f2f4;
@@ -17,17 +17,13 @@
       h1 { font-size: 13px; margin: 0; font-weight: 650; }
       p.hint { margin: 0 0 12px; color: #9a9aa3; font-size: 12px; }
       label { display: block; margin: 10px 0 4px; color: #b7b7bf; font-size: 12px; }
-      .field {
-        margin: 10px 0 0;
-        color: #b7b7bf;
-        font-size: 12px;
-        line-height: 1.9;
-      }
+      .field { margin: 8px 0 0; color: #b7b7bf; font-size: 12px; }
+      .field .label { display: block; margin-bottom: 3px; }
+      .field .range { display: flex; align-items: center; gap: 6px; color: #9a9aa3; }
       .field input {
         box-sizing: border-box;
-        width: 60px;
+        width: 64px;
         height: 26px;
-        margin: 0 3px;
         padding: 0 6px;
         border-radius: 7px;
         border: 1px solid #2e2e34;
@@ -38,7 +34,7 @@
         text-align: center;
       }
       input[type="checkbox"] { width: 14px; height: 14px; accent-color: #d93a3f; }
-      .check { display: flex; align-items: center; gap: 8px; margin-top: 12px; color: #d8d8de; }
+      .check { display: flex; align-items: center; gap: 8px; margin-top: 10px; color: #d8d8de; }
       button {
         width: 100%;
         margin-top: 14px;
@@ -62,21 +58,33 @@
     <p class="hint">Pick what Delete all touches, and how fast it works. Timing is randomised per item.</p>
 
     <div class="field">
-      Wait between
-      <input id="minDelay" type="number" min="300" step="50" aria-label="Fewest milliseconds between deletes" /> and
-      <input id="maxDelay" type="number" min="300" step="50" aria-label="Most milliseconds between deletes" /> ms per delete
+      <span class="label">Wait between deletes</span>
+      <div class="range">
+        <input id="minDelay" type="number" min="300" step="50" aria-label="Fewest milliseconds between deletes" />
+        <span>to</span>
+        <input id="maxDelay" type="number" min="300" step="50" aria-label="Most milliseconds between deletes" />
+        <span>ms</span>
+      </div>
     </div>
 
     <div class="field">
-      Long break between
-      <input id="every" type="number" min="2" step="1" aria-label="Fewest items between long breaks" /> and
-      <input id="everyMax" type="number" min="2" step="1" aria-label="Most items between long breaks" /> items
+      <span class="label">Long break every</span>
+      <div class="range">
+        <input id="every" type="number" min="2" step="1" aria-label="Fewest items between long breaks" />
+        <span>to</span>
+        <input id="everyMax" type="number" min="2" step="1" aria-label="Most items between long breaks" />
+        <span>items</span>
+      </div>
     </div>
 
     <div class="field">
-      Break lasts between
-      <input id="pause" type="number" min="1000" step="250" aria-label="Shortest long break in milliseconds" /> and
-      <input id="pauseMax" type="number" min="1000" step="250" aria-label="Longest long break in milliseconds" /> ms
+      <span class="label">Break length</span>
+      <div class="range">
+        <input id="pause" type="number" min="1000" step="250" aria-label="Shortest long break in milliseconds" />
+        <span>to</span>
+        <input id="pauseMax" type="number" min="1000" step="250" aria-label="Longest long break in milliseconds" />
+        <span>ms</span>
+      </div>
     </div>
 
     <div class="check">
@@ -97,13 +105,19 @@
     </div>
 
     <div class="field">
-      Delete at most
-      <input id="maxPerRun" type="number" min="0" step="10" aria-label="Most items per run, 0 for no limit" /> items per run
+      <span class="label">Delete at most</span>
+      <div class="range">
+        <input id="maxPerRun" type="number" min="0" step="10" aria-label="Most items per run, 0 for no limit" />
+        <span>items per run</span>
+      </div>
     </div>
 
     <div class="field">
-      Skip files larger than
-      <input id="maxSizeMB" type="number" min="0" step="0.5" aria-label="Skip files larger than this many megabytes, 0 for no limit" /> MB
+      <span class="label">Skip files larger than</span>
+      <div class="range">
+        <input id="maxSizeMB" type="number" min="0" step="0.5" aria-label="Skip files larger than this many megabytes, 0 for no limit" />
+        <span>MB</span>
+      </div>
     </div>
     <p class="hint" style="margin: 6px 0 0">0 means no limit on either cap.</p>
 
