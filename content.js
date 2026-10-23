@@ -39,6 +39,7 @@
     includeVideos: false,
     includeOther: false,
     maxPerRun: 0,
+    maxSizeMB: 0, // 0 = accept every size
   };
 
   let settings = { ...DEFAULTS };
@@ -111,6 +112,7 @@
       includeVideos: s.includeVideos === true,
       includeOther: s.includeOther === true,
       maxPerRun: num(s.maxPerRun, 0, 0, 50000),
+      maxSizeMB: num(s.maxSizeMB, 0, 0, 4096),
     };
     if (settings.maxDelay < settings.minDelay) settings.maxDelay = settings.minDelay;
     if (settings.longPauseEveryMax < settings.longPauseEveryMin) {
@@ -233,20 +235,28 @@
     return settings.includeOther;
   }
 
+  const sizeCap = () => (settings.maxSizeMB > 0 ? settings.maxSizeMB * 1024 * 1024 : 0);
+
   function classify(assets) {
     const counts = { plain: 0, edited: 0, video: 0, other: 0 };
     const chosen = { plain: 0, edited: 0, video: 0, other: 0 };
     const targets = [];
+    const cap = sizeCap();
+    let tooBig = 0;
     for (const a of assets) {
       if (!a || a.isDeleted) continue;
       const cls = classOf(a);
       counts[cls] += 1;
-      if (selected(a)) {
-        chosen[cls] += 1;
-        targets.push(a);
+      if (!selected(a)) continue;
+      // sizeBytes ships with every list row, so the cap costs no extra request
+      if (cap && (Number(a.sizeBytes) || 0) > cap) {
+        tooBig += 1;
+        continue;
       }
+      chosen[cls] += 1;
+      targets.push(a);
     }
-    return { counts, chosen, targets };
+    return { counts, chosen, targets, tooBig };
   }
 
   const mixShort = (c) =>
@@ -600,7 +610,7 @@
     }
 
     const assets = scanned.assets;
-    const { counts, targets } = classify(assets);
+    const { counts, targets, tooBig } = classify(assets);
     let queue = targets;
     if (settings.maxPerRun > 0 && queue.length > settings.maxPerRun) {
       queue = queue.slice(0, settings.maxPerRun);
@@ -628,7 +638,10 @@
       showToast({
         tone: 'success',
         title: 'Nothing to delete',
-        detail: mix + ' · filters: ' + filtersLabel(),
+        detail:
+          tooBig && !queue.length
+            ? 'all ' + plural(tooBig, 'match', 'matches') + ' are over ' + settings.maxSizeMB + ' MB'
+            : mix + ' · filters: ' + filtersLabel(),
         actions: [{ label: 'Close', onClick: hideToast }],
       });
       return;
@@ -641,7 +654,8 @@
         mixShort(queueCounts) +
         ' · scanned ' +
         plural(assets.length, 'asset', 'assets') +
-        (scanned.partial ? ' (partial)' : ''),
+        (scanned.partial ? ' (partial)' : '') +
+        (tooBig ? ' · skipping ' + fmtInt(tooBig) + ' over ' + settings.maxSizeMB + ' MB' : ''),
       actions: [
         {
           label: 'Delete ' + fmtInt(queue.length),
@@ -780,7 +794,7 @@
     list: listAllAssets,
     preview: async () => {
       const res = await listAllAssets();
-      const { counts, chosen, targets } = classify(res.assets);
+      const { counts, chosen, targets, tooBig } = classify(res.assets);
       return {
         scanned: res.assets.length,
         pages: res.pages,
@@ -788,6 +802,8 @@
         counts,
         chosen,
         queue: targets.length,
+        tooBig,
+        maxSizeMB: settings.maxSizeMB,
         filters: filtersLabel(),
       };
     },

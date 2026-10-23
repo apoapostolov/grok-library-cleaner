@@ -11,6 +11,7 @@ const DEFAULTS = {
   includeVideos: false,
   includeOther: false,
   maxPerRun: 0,
+  maxSizeMB: 0,
 };
 
 const NUMBER_FIELDS = [
@@ -21,6 +22,7 @@ const NUMBER_FIELDS = [
   ['longPauseMin', 'pause'],
   ['longPauseMax', 'pauseMax'],
   ['maxPerRun', 'maxPerRun'],
+  ['maxSizeMB', 'maxSizeMB'],
 ];
 
 const CHECKBOXES = ['includePlain', 'includeEdited', 'includeVideos', 'includeOther'];
@@ -46,6 +48,7 @@ function read() {
     longPauseMin: Math.min(300000, Math.max(1000, v('pause') || DEFAULTS.longPauseMin)),
     longPauseMax: Math.min(600000, Math.max(1000, v('pauseMax') || DEFAULTS.longPauseMax)),
     maxPerRun: Math.min(50000, Math.max(0, v('maxPerRun') || 0)),
+    maxSizeMB: Math.min(4096, Math.max(0, Math.round((v('maxSizeMB') || 0) * 10) / 10)),
   };
   for (const key of CHECKBOXES) out[key] = document.getElementById(key).checked;
   if (out.maxDelay < out.minDelay) out.maxDelay = out.minDelay;

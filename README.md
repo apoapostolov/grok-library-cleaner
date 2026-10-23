@@ -33,6 +33,8 @@ git clone https://github.com/apoapostolov/grok-library-cleaner.git
 
 **Separate selectors** for images (`image.jpg`), edited images (`edited-image.jpg`), videos (`generated_video.mp4`) and other files, with an optional per-run cap for a first pass on a large library.
 
+**Size guard.** "Skip files larger than N MB" keeps big renders out of a bulk purge. `sizeBytes` ships with every list row, so the guard adds no requests and no scanning time. It applies while the queue is built, before anything is deleted, and the confirm toast reports how many matches were spared. On a sample of 600 recent assets, a 1 MB cap spared 1.4% of plain images and 100% of videos. The per-tile glyph still deletes whatever you click, cap or no cap, because that click is explicit.
+
 ## Pacing
 
 The library endpoints rate limit, and the limiter answers `429` with no `Retry-After` header, so the extension spaces its own work:

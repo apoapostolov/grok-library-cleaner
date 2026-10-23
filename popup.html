@@ -91,6 +91,10 @@
     <label for="maxPerRun">Max per run (0 = no limit)</label>
     <div class="row"><input id="maxPerRun" type="number" min="0" step="10" /></div>
 
+    <label for="maxSizeMB">Skip files larger than (MB, 0 = no limit)</label>
+    <div class="row"><input id="maxSizeMB" type="number" min="0" step="0.5" /></div>
+    <p class="hint" style="margin: 6px 0 0">1 MB protects most full size renders. The size ships with every list row, so this adds no requests.</p>
+
     <button id="save">Save</button>
     <div id="status"></div>
 
