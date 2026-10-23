@@ -15,10 +15,12 @@
 
 Grok keeps every image and video it generates, and clearing them on `grok.com/library` means a hover menu and a confirmation dialog for each one. This extension works the library in both directions. Turn on saving and it writes each asset to disk with the prompt that made it, then deletes at a human pace: one tile at a time, or as a single confirmed sweep with a progress bar, a stop button and a size guard.
 
+Chats and projects are two more removal types in the same popup, both off by default, swept with the same scan, confirm and pacing.
+
 That order is the point. You leave with your work instead of a folder of untitled renders, and the library gets empty without you clicking a menu fifteen thousand times.
 
 <p align="center">
-  <img src="assets/popup.png" width="308" alt="Grok Library Cleaner settings popup: wait and break pacing, per-run and size caps, type filters, and the save-copy options with a folder name and prompt sidecars">
+  <img src="assets/popup.png" width="306" alt="Grok Library Cleaner settings popup: wait and break pacing, per-run and size caps, type filters, and the save-copy options with a folder name and prompt sidecars">
 </p>
 
 <p align="center"><sub>The settings popup at its real size, with saving turned on.</sub></p>
@@ -34,6 +36,8 @@ git clone https://github.com/apoapostolov/grok-library-cleaner.git
 3. Reload any open `grok.com/library` tab.
 
 ## What you get
+
+**Chats and projects.** Two removal types beyond the library, off by default. Chats are the sessions in the sidebar. Projects are what Grok stores as workspaces, and they are deleted through the same confirmed sweep. Neither has a size or a download step, because neither is a file. A chat that belongs to a project is left alone when you remove chats, so clearing sessions cannot gut a project. With a per-run cap set, the queue fills in the order the popup shows: chats, then projects, then library files.
 
 **Save first.** With **Save a copy before deleting** on, every asset is written to disk before its delete request is sent, and a matching `.md` holds the prompt plus model, mode, aspect ratio and dimensions. A file that fails to save is never deleted, so a bad path or a full disk cannot cost you an image.
 
@@ -83,6 +87,10 @@ All of it is adjustable in the toolbar popup.
 
 The extension drives the same REST endpoints the page uses, with your existing session cookies:
 
+- `GET /rest/app-chat/conversations` lists chats 60 at a time by `pageToken`, each with the `workspaces[]` it belongs to.
+- `DELETE /rest/app-chat/conversations/<id>` removes one chat.
+- `GET /rest/workspaces?kind=WORKSPACE_KIND_ALL` lists projects.
+- `DELETE /rest/workspaces/<id>` removes one project.
 - `GET /rest/assets` lists the library, newest first, paginated by `pageToken`.
 - `GET /rest/assets/<assetId>` returns one asset, including `mediaGenInput` with the prompt and generation settings.
 - `DELETE /rest/assets-metadata/<assetId>` removes one asset.
@@ -96,7 +104,8 @@ The extension has no backend and no analytics. It talks to `grok.com` for the li
 
 ## Notes
 
-- Deletion is permanent on Grok's side and there is no undo.
+- Deletion is permanent on Grok's side and there is no undo, for chats and projects as much as for images.
+- Deleting a project removes the project. What Grok does with the chats inside it is Grok's behaviour, and the extension does not know in advance.
 - Saving is opt in. Turn on **Save a copy before deleting**, click **Test download** once, open the folder, then start the purge.
 - The prompt `.md` files are on by default once saving is on, and can be switched off on their own.
 - Keep the library tab open while a run is in progress.

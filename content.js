@@ -40,6 +40,8 @@
     includeOther: false,
     maxPerRun: 0,
     maxSizeMB: 0, // 0 = accept every size
+    removeSessions: false, // chats and sessions, off by default
+    removeProjects: false, // projects (workspaces), off by default
     downloadFirst: false, // opt in: save a copy before deleting
     folder: '', // empty means straight into Downloads, no invented name
     savePrompts: true, // write a .md beside each file when a prompt exists
@@ -116,6 +118,8 @@
       includeOther: s.includeOther === true,
       maxPerRun: num(s.maxPerRun, 0, 0, 50000),
       maxSizeMB: num(s.maxSizeMB, 0, 0, 4096),
+      removeSessions: s.removeSessions === true,
+      removeProjects: s.removeProjects === true,
       downloadFirst: s.downloadFirst === true,
       folder: String(s.folder || '').trim(),
       savePrompts: s.savePrompts !== false,
@@ -138,8 +142,19 @@
 
   // ---------------------------------------------------------- delete API
 
-  async function deleteOnce(id) {
-    const res = await fetch(API_DELETE + '/' + encodeURIComponent(id), {
+  const API_CONVERSATIONS = '/rest/app-chat/conversations';
+  const API_WORKSPACES = '/rest/workspaces';
+
+  /* Chats and projects live under their own routes; library assets have theirs. */
+  function deletePath(kind, id) {
+    const key = encodeURIComponent(id);
+    if (kind === 'conversation') return API_CONVERSATIONS + '/' + key;
+    if (kind === 'workspace') return API_WORKSPACES + '/' + key;
+    return API_DELETE + '/' + key;
+  }
+
+  async function deleteOnce(kind, id) {
+    const res = await fetch(deletePath(kind, id), {
       method: 'DELETE',
       credentials: 'include',
     });
@@ -152,13 +167,13 @@
     return { status: res.status, ok: res.ok, retryAfter: res.headers.get('retry-after'), body };
   }
 
-  async function deleteWithRetry(id) {
+  async function deleteWithRetry(kind, id) {
     let attempt = 0;
     while (attempt < 4) {
       if (stopRequested) return { stopped: true };
       let r;
       try {
-        r = await deleteOnce(id);
+        r = await deleteOnce(kind, id);
       } catch (e) {
         await sleep(rand(1500, 3500) * Math.pow(1.6, attempt));
         attempt += 1;
@@ -244,8 +259,8 @@
   const sizeCap = () => (settings.maxSizeMB > 0 ? settings.maxSizeMB * 1024 * 1024 : 0);
 
   function classify(assets) {
-    const counts = { plain: 0, edited: 0, video: 0, other: 0 };
     const chosen = { plain: 0, edited: 0, video: 0, other: 0 };
+    const counts = { plain: 0, edited: 0, video: 0, other: 0 };
     const targets = [];
     const cap = sizeCap();
     let tooBig = 0;
@@ -266,12 +281,21 @@
   }
 
   const mixShort = (c) =>
-    [c.plain && 'images ' + fmtInt(c.plain), c.edited && 'edited ' + fmtInt(c.edited), c.video && 'videos ' + fmtInt(c.video), c.other && 'files ' + fmtInt(c.other)]
+    [
+      c.chats && 'chats ' + fmtInt(c.chats),
+      c.projects && 'projects ' + fmtInt(c.projects),
+      c.plain && 'images ' + fmtInt(c.plain),
+      c.edited && 'edited ' + fmtInt(c.edited),
+      c.video && 'videos ' + fmtInt(c.video),
+      c.other && 'files ' + fmtInt(c.other),
+    ]
       .filter(Boolean)
       .join(' · ') || 'nothing';
 
   function filtersLabel() {
     const parts = [];
+    if (settings.removeSessions) parts.push('chats');
+    if (settings.removeProjects) parts.push('projects');
     if (settings.includePlain) parts.push('images');
     if (settings.includeEdited) parts.push('edited');
     if (settings.includeVideos) parts.push('videos');
@@ -646,7 +670,7 @@
           return;
         }
 
-        const res = await deleteWithRetry(id);
+        const res = await deleteWithRetry('asset', id);
         if (res.ok) {
           const name = tileButton.getAttribute('aria-label') || 'item';
           hideTile(tile);
@@ -749,17 +773,109 @@
     hideToast();
   }
 
+  // --------------------------------------------------- chats and projects
+
+  /**
+   * Chats paginate 60 at a time. A chat that sits inside a project is left
+   * alone here: it belongs to that project, so removing chats never guts one.
+   */
+  async function listConversations(onProgress, stopWhen) {
+    const out = [];
+    let token = null;
+    let pages = 0;
+    let partial = false;
+    while (pages < 500) {
+      if (stopRequested) break;
+      const params = new URLSearchParams({ pageSize: '60' });
+      if (token) params.set('pageToken', token);
+      let res = await fetch(API_CONVERSATIONS + '?' + params, { credentials: 'include' });
+      if (res.status === 429) {
+        await sleep(rand(18000, 32000));
+        continue;
+      }
+      if (!res.ok) throw new Error('chats HTTP ' + res.status);
+      const json = await res.json();
+      for (const c of json.conversations || []) out.push(c);
+      token = json.nextPageToken || null;
+      pages += 1;
+      if (onProgress) onProgress({ chats: out.length, pages });
+      if (stopWhen && stopWhen(out)) {
+        partial = true;
+        break;
+      }
+      if (!token) break;
+      await sleep(rand(1200, 2000));
+    }
+    return { items: out, partial };
+  }
+
+  async function listWorkspaces(onProgress, stopWhen) {
+    const out = [];
+    let token = null;
+    let pages = 0;
+    let partial = false;
+    while (pages < 40) {
+      if (stopRequested) break;
+      const params = new URLSearchParams({
+        pageSize: '50',
+        kind: 'WORKSPACE_KIND_ALL',
+        orderBy: 'ORDER_BY_LAST_USE_TIME',
+      });
+      if (token) params.set('pageToken', token);
+      let res = await fetch(API_WORKSPACES + '?' + params, { credentials: 'include' });
+      if (res.status === 429) {
+        await sleep(rand(18000, 32000));
+        continue;
+      }
+      if (!res.ok) throw new Error('projects HTTP ' + res.status);
+      const json = await res.json();
+      for (const w of json.workspaces || []) out.push(w);
+      token = json.nextPageToken || null;
+      pages += 1;
+      if (onProgress) onProgress({ projects: out.length });
+      if (stopWhen && stopWhen(out)) {
+        partial = true;
+        break;
+      }
+      if (!token) break;
+      await sleep(rand(1200, 2000));
+    }
+    return { items: out, partial };
+  }
+
+  const chatEntry = (c) => ({
+    kind: 'conversation',
+    id: c.conversationId,
+    title: c.title || 'untitled chat',
+    inProject: Array.isArray(c.workspaces) && c.workspaces.length > 0,
+  });
+
+  const projectEntry = (w) => ({
+    kind: 'workspace',
+    id: w.workspaceId,
+    title: w.name || 'unnamed project',
+  });
+
+  const assetEntry = (a) => ({ kind: 'asset', id: a.assetId, title: a.name || 'asset', asset: a });
+
+  /** Anything selected at all? */
+  function anyTypeSelected() {
+    return (
+      settings.removeSessions ||
+      settings.removeProjects ||
+      settings.includePlain ||
+      settings.includeEdited ||
+      settings.includeVideos ||
+      settings.includeOther
+    );
+  }
+
   // ------------------------------------------------------------------ scan
 
   async function startScan() {
     if (phase !== 'idle') return;
-    if (
-      !settings.includePlain &&
-      !settings.includeEdited &&
-      !settings.includeVideos &&
-      !settings.includeOther
-    ) {
-      flashError('Nothing selected', 'Turn on images, edited images, videos or files in the popup.');
+    if (!anyTypeSelected()) {
+      flashError('Nothing selected', 'Turn on chats, projects, images, videos or files in the popup.');
       return;
     }
 
@@ -772,62 +888,127 @@
     }
 
     const stopAction = { label: 'Cancel', kind: 'danger', onClick: cancelAll };
-
-    let scanned;
     const limit = settings.maxPerRun;
+    const wantAssets =
+      settings.includePlain || settings.includeEdited || settings.includeVideos || settings.includeOther;
+
+    let convs = [];
+    let projects = [];
+    let assets = [];
+    let partial = false;
+    let chatsInProjects = 0;
+    let tooBig = 0;
+    const queue = [];
+    const room = () => (limit > 0 ? Math.max(0, limit - queue.length) : Infinity);
+
     try {
-      scanned = await listAllAssets(
-        (p) => {
+      if (settings.removeSessions) {
+        const wantedChats = room();
+        const scannedChats = await listConversations(
+          (p) => {
           showToast({
             tone: 'busy',
-            title: p.throttled ? 'Rate limited, cooling down' : 'Scanning library',
-            detail:
-              plural(p.count, 'asset', 'assets') +
-              ' · ' +
-              plural(p.pages, 'page', 'pages') +
-              (p.throttled ? ' · waiting ~20-30s' : ''),
+            title: 'Scanning chats',
+            detail: plural(p.chats, 'chat', 'chats') + ' · ' + plural(p.pages, 'page', 'pages'),
             progress: { indeterminate: true },
             actions: [stopAction],
           });
-        },
-        limit > 0 ? (arr) => classify(arr).targets.length >= limit : null
-      );
+          },
+          limit > 0
+            ? (cs) =>
+                cs.filter((c) => !(Array.isArray(c.workspaces) && c.workspaces.length)).length >= wantedChats
+            : null
+        );
+        if (stopRequested) return cancelAll();
+        convs = scannedChats.items;
+        if (scannedChats.partial) partial = true;
+        for (const c of convs) {
+          const entry = chatEntry(c);
+          // a chat inside a project belongs to that project, so keep it here
+          if (entry.inProject) {
+            chatsInProjects += 1;
+            continue;
+          }
+          if (room() <= 0) break;
+          queue.push(entry);
+        }
+      }
+
+      if (settings.removeProjects && room() > 0) {
+        const wantedProjects = room();
+        const scannedProjects = await listWorkspaces(
+          (p) => {
+          showToast({
+            tone: 'busy',
+            title: 'Scanning projects',
+            detail: plural(p.projects, 'project', 'projects'),
+            progress: { indeterminate: true },
+            actions: [stopAction],
+          });
+          },
+          limit > 0 ? (ws) => ws.length >= wantedProjects : null
+        );
+        if (stopRequested) return cancelAll();
+        projects = scannedProjects.items;
+        if (scannedProjects.partial) partial = true;
+        for (const w of projects) {
+          if (room() <= 0) break;
+          queue.push(projectEntry(w));
+        }
+      }
+
+      if (wantAssets && room() > 0) {
+        const wanted = room();
+        const res = await listAllAssets(
+          (p) => {
+            showToast({
+              tone: 'busy',
+              title: p.throttled ? 'Rate limited, cooling down' : 'Scanning library',
+              detail:
+                plural(p.count, 'asset', 'assets') +
+                ' · ' +
+                plural(p.pages, 'page', 'pages') +
+                (p.throttled ? ' · waiting ~20-30s' : ''),
+              progress: { indeterminate: true },
+              actions: [stopAction],
+            });
+          },
+          limit > 0 ? (arr) => classify(arr).targets.length >= wanted : null
+        );
+        if (stopRequested) return cancelAll();
+        assets = res.assets;
+        partial = res.partial;
+        const built = classify(assets);
+        tooBig = built.tooBig;
+        for (const a of built.targets) {
+          if (room() <= 0) break;
+          queue.push(assetEntry(a));
+        }
+      }
     } catch (e) {
       phase = 'idle';
       resetHeaderButton();
       showToast({
         tone: 'error',
-        title: 'Could not read the library',
+        title: 'Could not read your account',
         detail: String((e && e.message) || e),
         actions: [{ label: 'Dismiss', onClick: hideToast }],
       });
       return;
     }
 
-    if (stopRequested) {
-      cancelAll();
-      return;
+    const queueCounts = { chats: 0, projects: 0, plain: 0, edited: 0, video: 0, other: 0 };
+    for (const entry of queue) {
+      if (entry.kind === 'conversation') queueCounts.chats += 1;
+      else if (entry.kind === 'workspace') queueCounts.projects += 1;
+      else queueCounts[classOf(entry.asset)] += 1;
     }
+    const hasAssets = queue.some((entry) => entry.kind === 'asset');
 
-    const assets = scanned.assets;
-    const { counts, targets, tooBig } = classify(assets);
-    let queue = targets;
-    if (settings.maxPerRun > 0 && queue.length > settings.maxPerRun) {
-      queue = queue.slice(0, settings.maxPerRun);
-    }
-
-    const mix =
-      'images ' +
-      counts.plain +
-      ' · edited ' +
-      counts.edited +
-      ' · videos ' +
-      counts.video +
-      ' · files ' +
-      counts.other;
-
-    const queueCounts = { plain: 0, edited: 0, video: 0, other: 0 };
-    for (const a of queue) queueCounts[classOf(a)] += 1;
+    const scannedParts = [];
+    if (settings.removeSessions) scannedParts.push(plural(convs.length, 'chat', 'chats'));
+    if (settings.removeProjects) scannedParts.push(plural(projects.length, 'project', 'projects'));
+    if (wantAssets) scannedParts.push(plural(assets.length, 'asset', 'assets'));
 
     phase = 'confirm';
     if (btn) btn.textContent = 'Awaiting confirm';
@@ -841,7 +1022,10 @@
         detail:
           tooBig && !queue.length
             ? 'all ' + plural(tooBig, 'match', 'matches') + ' are over ' + settings.maxSizeMB + ' MB'
-            : mix + ' · filters: ' + filtersLabel(),
+            : mixShort(queueCounts) +
+              ' · filters: ' +
+              filtersLabel() +
+              (chatsInProjects ? ' · ' + fmtInt(chatsInProjects) + ' chats sit inside projects' : ''),
         actions: [{ label: 'Close', onClick: hideToast }],
       });
       return;
@@ -852,20 +1036,23 @@
       title: 'Delete ' + plural(queue.length, 'item', 'items') + '?',
       detail:
         mixShort(queueCounts) +
-        ' · scanned ' +
-        plural(assets.length, 'asset', 'assets') +
-        (scanned.partial ? ' (partial)' : '') +
+        (chatsInProjects ? ' · ' + fmtInt(chatsInProjects) + ' in projects kept' : '') +
         (tooBig ? ' · skipping ' + fmtInt(tooBig) + ' over ' + settings.maxSizeMB + ' MB' : '') +
-        (settings.downloadFirst
-          ? ' · saving to ' + (settings.folder ? 'Downloads/' + settings.folder : 'Downloads')
-          : ' · no copies saved'),
+        (hasAssets
+          ? settings.downloadFirst
+            ? ' · saving to ' + (settings.folder ? 'Downloads/' + settings.folder : 'Downloads')
+            : ' · no copies saved'
+          : '') +
+        ' · scanned ' +
+        scannedParts.join(' · ') +
+        (partial ? ' (partial)' : ''),
       actions: [
         {
           label: 'Delete ' + fmtInt(queue.length),
           kind: 'danger',
           onClick: () => {
             phase = 'run';
-            runDeletion(queue, mix);
+            runDeletion(queue);
           },
         },
         { label: 'Cancel', onClick: cancelAll },
@@ -875,7 +1062,7 @@
 
   // ---------------------------------------------------------------- delete
 
-  async function runDeletion(queue, mix) {
+  async function runDeletion(queue) {
     const btn = headerButton();
     if (btn) {
       btn.dataset.running = '1';
@@ -920,9 +1107,9 @@
 
     for (let i = 0; i < queue.length; i += 1) {
       if (stopRequested) break;
-      const asset = queue[i];
-      const saved = await archiveAsset(asset);
-      const res = saved.ok ? await deleteWithRetry(asset.assetId) : { ok: false, unsaved: saved.error };
+      const entry = queue[i];
+      const saved = entry.kind === 'asset' ? await archiveAsset(entry.asset) : { ok: true, skipped: true };
+      const res = saved.ok ? await deleteWithRetry(entry.kind, entry.id) : { ok: false, unsaved: saved.error };
 
       if (res.stopped) break;
       if (res.auth) {
@@ -932,7 +1119,7 @@
       if (res.ok) {
         deleted += 1;
         if (saved.path) savedCount += 1;
-        removeTileById(asset.assetId);
+        if (entry.kind === 'asset') removeTileById(entry.id);
       } else {
         failed += 1;
         if (res.unsaved) {

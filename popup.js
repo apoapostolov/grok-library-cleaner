@@ -12,6 +12,8 @@ const DEFAULTS = {
   includeOther: false,
   maxPerRun: 0,
   maxSizeMB: 0,
+  removeSessions: false,
+  removeProjects: false,
   downloadFirst: false,
   folder: '',
   savePrompts: true,
@@ -29,6 +31,8 @@ const NUMBER_FIELDS = [
 ];
 
 const CHECKBOXES = [
+  'removeSessions',
+  'removeProjects',
   'includePlain',
   'includeEdited',
   'includeVideos',
