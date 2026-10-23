@@ -99,67 +99,162 @@
   0%, 100% { box-shadow: 0 0 0 0 rgba(217, 58, 63, 0.5); }
   50% { box-shadow: 0 0 0 6px rgba(217, 58, 63, 0); }
 }
+/* ---------------------------------------------------------------- toast */
 
-.glc-panel {
+.glc-toast {
+  --glc-tone: #8b8b93;
   position: fixed;
-  bottom: 16px;
-  left: 16px;
+  right: 20px;
+  bottom: 20px;
   z-index: 2147483000;
-  min-width: 260px;
-  max-width: 340px;
-  padding: 12px 14px;
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(18, 18, 21, 0.94);
-  color: #f2f2f4;
-  font: 13px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  box-sizing: border-box;
+  width: 292px;
+  padding: 10px 12px 11px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(21, 22, 27, 0.96);
+  color: #f3f3f5;
+  font: 12.5px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  letter-spacing: -0.01em;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  animation: glc-toast-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
+  overflow: hidden;
 }
 
-.glc-panel-title {
+.glc-toast[data-tone="success"] { --glc-tone: #2fbf71; }
+.glc-toast[data-tone="error"] { --glc-tone: #e5484d; }
+.glc-toast[data-tone="busy"] { --glc-tone: #d93a3f; }
+.glc-toast[data-tone="confirm"] { --glc-tone: #e0a33a; }
+
+@keyframes glc-toast-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.glc-toast[data-leaving="1"] {
+  opacity: 0;
+  transform: translateY(6px) scale(0.985);
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.glc-toast-row {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 600;
-  margin-bottom: 6px;
+  align-items: flex-start;
+  gap: 9px;
 }
 
-.glc-panel-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: #d93a3f;
+.glc-toast-icon {
   flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--glc-tone) 20%, transparent);
+  color: var(--glc-tone);
 }
 
-.glc-panel-dot[data-state="done"] { background: #2fbf71; }
-.glc-panel-dot[data-state="idle"] { background: #8b8b93; }
+.glc-toast-icon svg { display: block; }
 
-.glc-panel-line {
-  color: #b7b7bf;
+.glc-toast-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.glc-toast-title {
+  font-weight: 600;
+  font-size: 12.5px;
+  color: #f6f6f8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.glc-toast-detail {
+  margin-top: 1px;
+  font-size: 11.5px;
+  color: #a9aab3;
   font-variant-numeric: tabular-nums;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
-.glc-panel-line b { color: #fff; font-weight: 600; }
-
-.glc-panel-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 10px;
-}
-
-.glc-panel-btn {
-  flex: 1;
-  height: 28px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  background: rgba(255, 255, 255, 0.06);
-  color: #f2f2f4;
-  font: 500 12px/1 inherit;
+.glc-toast-close {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #7c7d87;
   cursor: pointer;
+  line-height: 0;
+  opacity: 0;
+  transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
 }
 
-.glc-panel-btn:hover { background: rgba(255, 255, 255, 0.14); }
-.glc-panel-btn[data-kind="danger"] { border-color: rgba(217, 58, 63, 0.6); color: #ff9b9b; }
+.glc-toast:hover .glc-toast-close { opacity: 1; }
+.glc-toast-close:hover { background: rgba(255, 255, 255, 0.1); color: #e8e8ee; }
+
+.glc-toast-track {
+  position: relative;
+  height: 3px;
+  margin-top: 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.09);
+  overflow: hidden;
+}
+
+.glc-toast-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0%;
+  border-radius: 999px;
+  background: var(--glc-tone);
+  transition: width 240ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.glc-toast-track[data-indeterminate="1"] .glc-toast-fill {
+  width: 38%;
+  animation: glc-indeterminate 1.25s ease-in-out infinite;
+}
+
+@keyframes glc-indeterminate {
+  0% { transform: translateX(-105%); }
+  100% { transform: translateX(265%); }
+}
+
+.glc-toast-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.glc-toast-btn {
+  flex: 1;
+  height: 26px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  color: #eaeaef;
+  font: 500 11.5px/1 inherit;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.glc-toast-btn:hover { background: rgba(255, 255, 255, 0.13); }
+.glc-toast-btn[data-kind="danger"] {
+  border-color: rgba(229, 72, 77, 0.55);
+  background: rgba(229, 72, 77, 0.16);
+  color: #ffb4b6;
+}
+.glc-toast-btn[data-kind="danger"]:hover { background: rgba(229, 72, 77, 0.28); }

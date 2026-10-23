@@ -45,7 +45,7 @@
   let phase = 'idle'; // idle | scan | confirm | run
   let stopRequested = false;
   let armTimer = null;
-  let panelEl = null;
+  let toastEl = null;
 
   // ---------------------------------------------------------------- utils
 
@@ -56,7 +56,8 @@
     if (!Number.isFinite(n)) return fallback;
     return Math.min(max, Math.max(min, n));
   };
-  const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
+  const fmtInt = (n) => Number(n).toLocaleString('en-US');
+  const plural = (n, one, many) => fmtInt(n) + ' ' + (n === 1 ? one : many);
 
   const kindOf = (mime) => {
     const m = String(mime || '');
@@ -248,6 +249,11 @@
     return { counts, chosen, targets };
   }
 
+  const mixShort = (c) =>
+    [c.plain && 'images ' + fmtInt(c.plain), c.edited && 'edited ' + fmtInt(c.edited), c.video && 'videos ' + fmtInt(c.video), c.other && 'files ' + fmtInt(c.other)]
+      .filter(Boolean)
+      .join(' · ') || 'nothing';
+
   function filtersLabel() {
     const parts = [];
     if (settings.includePlain) parts.push('images');
@@ -257,72 +263,158 @@
     return parts.join(' + ') || 'nothing selected';
   }
 
-  // ---------------------------------------------------------------- panel
+  // ---------------------------------------------------------------- toast
 
-  function panel() {
-    if (panelEl && document.body.contains(panelEl)) return panelEl;
-    panelEl = document.createElement('div');
-    panelEl.className = 'glc-panel';
+  const TOAST_ICONS = {
+    success:
+      '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" ' +
+      'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<path d="M3 8.4l3.6 3.6L13 5"/></svg>',
+    error:
+      '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" ' +
+      'stroke-width="2" stroke-linecap="round" aria-hidden="true">' +
+      '<circle cx="8" cy="8" r="6"/><path d="M8 4.8v3.6"/><path d="M8 11.2h.01"/></svg>',
+    busy:
+      '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" ' +
+      'stroke-width="2" stroke-linecap="round" aria-hidden="true">' +
+      '<path d="M2.6 5.2h10.8"/><path d="M12.6 5.2l-.9 8H4.3l-.9-8"/><path d="M6.4 7.8v3.2"/>' +
+      '<path d="M9.6 7.8v3.2"/></svg>',
+    confirm:
+      '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" ' +
+      'stroke-width="2" stroke-linecap="round" aria-hidden="true">' +
+      '<path d="M8 3v5.4"/><path d="M8 11.8h.01"/></svg>',
+  };
+
+  const TONES = {
+    idle: 'busy',
+    run: 'busy',
+    done: 'success',
+    success: 'success',
+    error: 'error',
+    confirm: 'confirm',
+    busy: 'busy',
+  };
+
+  let toastTimer = null;
+
+  function toastNode() {
+    if (toastEl && document.body.contains(toastEl)) return toastEl;
+    toastEl = document.createElement('div');
+    toastEl.className = 'glc-toast';
+    toastEl.setAttribute('role', 'status');
+    toastEl.setAttribute('aria-live', 'polite');
     // Static markup only; library data is never interpolated into innerHTML.
-    panelEl.innerHTML =
-      '<div class="glc-panel-title"><span class="glc-panel-dot" data-state="idle"></span>' +
-      '<span class="glc-ptitle"></span></div><div class="glc-panel-body"></div>' +
-      '<div class="glc-panel-actions"></div>';
-    document.body.appendChild(panelEl);
-    return panelEl;
+    toastEl.innerHTML =
+      '<div class="glc-toast-row">' +
+      '<span class="glc-toast-icon"></span>' +
+      '<div class="glc-toast-text">' +
+      '<div class="glc-toast-title"></div><div class="glc-toast-detail"></div>' +
+      '</div>' +
+      '<button type="button" class="glc-toast-close" aria-label="Dismiss notification"></button>' +
+      '</div>' +
+      '<div class="glc-toast-track"><div class="glc-toast-fill"></div></div>' +
+      '<div class="glc-toast-actions"></div>';
+    toastEl.querySelector('.glc-toast-close').innerHTML =
+      '<svg viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" ' +
+      'stroke-width="1.6" stroke-linecap="round"><path d="M3 3l6 6M9 3l-6 6"/></svg>';
+    document.body.appendChild(toastEl);
+    return toastEl;
   }
 
-  function hidePanel() {
-    if (panelEl) {
-      panelEl.remove();
-      panelEl = null;
+  function hideToast() {
+    if (toastTimer) {
+      clearTimeout(toastTimer);
+      toastTimer = null;
     }
+    if (!toastEl) return;
+    const el = toastEl;
+    el.dataset.leaving = '1';
+    setTimeout(() => {
+      el.remove();
+      if (toastEl === el) toastEl = null;
+    }, 170);
   }
 
-  function setPanel(opts) {
-    const el = panel();
-    const dot = el.querySelector('.glc-panel-dot');
-    dot.dataset.state = opts.state || 'idle';
-    el.querySelector('.glc-ptitle').textContent = opts.title || '';
+  /**
+   * One surface for every message. Accepts either a ready-made detail string or
+   * the older [label, value] line pairs, and an optional progress descriptor:
+   * { value, max } for a determinate bar, { indeterminate: true } for a sweep.
+   */
+  function showToast(opts) {
+    const el = toastNode();
+    const tone = TONES[opts.tone || opts.state || 'busy'] || 'busy';
+    el.dataset.tone = tone;
+    el.dataset.leaving = '0';
+    el.setAttribute('role', tone === 'error' ? 'alert' : 'status');
 
-    const body = el.querySelector('.glc-panel-body');
-    body.textContent = '';
-    for (const [label, value] of opts.lines || []) {
-      const line = document.createElement('div');
-      line.className = 'glc-panel-line';
-      if (label) {
-        const strong = document.createElement('b');
-        strong.textContent = label + ' ';
-        line.appendChild(strong);
+    const detail =
+      opts.detail !== undefined
+        ? String(opts.detail)
+        : (opts.lines || []).map(([label, value]) => (label ? label + ' ' : '') + value).join('  ·  ');
+
+    el.querySelector('.glc-toast-icon').innerHTML = TOAST_ICONS[tone] || TOAST_ICONS.busy;
+    el.querySelector('.glc-toast-title').textContent = opts.title || '';
+    const detailEl = el.querySelector('.glc-toast-detail');
+    detailEl.textContent = detail;
+    detailEl.style.display = detail ? '' : 'none';
+
+    const track = el.querySelector('.glc-toast-track');
+    if (opts.progress) {
+      track.style.display = '';
+      if (opts.progress.indeterminate) {
+        track.dataset.indeterminate = '1';
+        el.querySelector('.glc-toast-fill').style.width = '';
+      } else {
+        track.dataset.indeterminate = '0';
+        const max = Math.max(1, Number(opts.progress.max) || 1);
+        const pct = Math.min(100, Math.max(0, (Number(opts.progress.value) || 0) / max * 100));
+        el.querySelector('.glc-toast-fill').style.width = (pct > 0 ? Math.max(2, pct) : 0) + '%';
       }
-      line.appendChild(document.createTextNode(String(value)));
-      body.appendChild(line);
+    } else {
+      track.style.display = 'none';
     }
 
-    const actions = el.querySelector('.glc-panel-actions');
+    const actions = el.querySelector('.glc-toast-actions');
     actions.textContent = '';
     for (const action of opts.actions || []) {
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = 'glc-panel-btn';
+      btn.className = 'glc-toast-btn';
       if (action.kind) btn.dataset.kind = action.kind;
       btn.textContent = action.label;
       btn.addEventListener('click', action.onClick);
       actions.appendChild(btn);
     }
     actions.style.display = (opts.actions || []).length ? 'flex' : 'none';
+
+    const close = el.querySelector('.glc-toast-close');
+    close.style.display = (opts.actions || []).length ? 'none' : '';
+    close.onclick = hideToast;
+
+    // re-run the entrance animation when the same toast is rewritten
+    el.style.animation = 'none';
+    void el.offsetWidth;
+    el.style.animation = '';
+
+    if (toastTimer) {
+      clearTimeout(toastTimer);
+      toastTimer = null;
+    }
+    if (opts.autoHide) {
+      toastTimer = setTimeout(() => {
+        if (opts.autoHideGuard ? opts.autoHideGuard() : true) hideToast();
+      }, opts.autoHide);
+    }
+    return el;
+  }
+
+  function flashSuccess(title, detail) {
+    if (phase !== 'idle') return; // a run owns the toast while it is working
+    showToast({ tone: 'success', title, detail, autoHide: 3200 });
   }
 
   function flashError(title, detail) {
-    setPanel({
-      state: 'idle',
-      title,
-      lines: detail ? [['', detail]] : [],
-      actions: [{ label: 'Dismiss', onClick: hidePanel }],
-    });
-    setTimeout(() => {
-      if (phase === 'idle') hidePanel();
-    }, 5000);
+    showToast({ tone: 'error', title, detail, autoHide: 6500 });
   }
 
   // ----------------------------------------------------------- tile glyph
@@ -349,7 +441,9 @@
         glyph.dataset.busy = '1';
         const res = await deleteWithRetry(id);
         if (res.ok) {
+          const name = tileButton.getAttribute('aria-label') || 'item';
           hideTile(tile);
+          flashSuccess('Deleted ' + name, res.gone ? 'It was already gone' : 'Removed from the library');
           return;
         }
         glyph.dataset.busy = '0';
@@ -442,7 +536,7 @@
     stopRequested = true;
     phase = 'idle';
     resetHeaderButton();
-    hidePanel();
+    hideToast();
   }
 
   // ------------------------------------------------------------------ scan
@@ -474,14 +568,15 @@
     try {
       scanned = await listAllAssets(
         (p) => {
-          setPanel({
-            state: 'run',
-            title: p.throttled ? 'Throttled, cooling down' : 'Scanning library',
-            lines: [
-              ['Pages', String(p.pages)],
-              ['Assets', String(p.count)],
-              ['', p.throttled ? 'HTTP 429, waiting ~20-30s' : 'walking page tokens'],
-            ],
+          showToast({
+            tone: 'busy',
+            title: p.throttled ? 'Rate limited, cooling down' : 'Scanning library',
+            detail:
+              plural(p.count, 'asset', 'assets') +
+              ' · ' +
+              plural(p.pages, 'page', 'pages') +
+              (p.throttled ? ' · waiting ~20-30s' : ''),
+            progress: { indeterminate: true },
             actions: [stopAction],
           });
         },
@@ -490,11 +585,11 @@
     } catch (e) {
       phase = 'idle';
       resetHeaderButton();
-      setPanel({
-        state: 'idle',
+      showToast({
+        tone: 'error',
         title: 'Could not read the library',
-        lines: [['', String((e && e.message) || e)]],
-        actions: [{ label: 'Dismiss', onClick: hidePanel }],
+        detail: String((e && e.message) || e),
+        actions: [{ label: 'Dismiss', onClick: hideToast }],
       });
       return;
     }
@@ -505,7 +600,7 @@
     }
 
     const assets = scanned.assets;
-    const { counts, chosen, targets } = classify(assets);
+    const { counts, targets } = classify(assets);
     let queue = targets;
     if (settings.maxPerRun > 0 && queue.length > settings.maxPerRun) {
       queue = queue.slice(0, settings.maxPerRun);
@@ -520,15 +615,9 @@
       counts.video +
       ' · files ' +
       counts.other;
-    const chosenMix =
-      'images ' +
-      chosen.plain +
-      ' · edited ' +
-      chosen.edited +
-      ' · videos ' +
-      chosen.video +
-      ' · files ' +
-      chosen.other;
+
+    const queueCounts = { plain: 0, edited: 0, video: 0, other: 0 };
+    for (const a of queue) queueCounts[classOf(a)] += 1;
 
     phase = 'confirm';
     if (btn) btn.textContent = 'Awaiting confirm';
@@ -536,32 +625,26 @@
     if (!queue.length) {
       phase = 'idle';
       resetHeaderButton();
-      setPanel({
-        state: 'done',
+      showToast({
+        tone: 'success',
         title: 'Nothing to delete',
-        lines: [
-          ['Library', mix],
-          ['Filters', filtersLabel()],
-          ['Selected', 'none, check the popup filters'],
-        ],
-        actions: [{ label: 'Close', onClick: hidePanel }],
+        detail: mix + ' · filters: ' + filtersLabel(),
+        actions: [{ label: 'Close', onClick: hideToast }],
       });
       return;
     }
 
-    setPanel({
-      state: 'run',
-      title: 'Ready to delete',
-      lines: [
-        ['Queue', plural(queue.length, 'item', 'items')],
-        ['Contains', chosenMix],
-        ['Library', mix],
-        ['Filters', filtersLabel()],
-        ['Scanned', plural(assets.length, 'asset', 'assets') + ' · ' + plural(scanned.pages, 'page', 'pages') + (scanned.partial ? ' · partial' : '')],
-      ],
+    showToast({
+      tone: 'confirm',
+      title: 'Delete ' + plural(queue.length, 'item', 'items') + '?',
+      detail:
+        mixShort(queueCounts) +
+        ' · scanned ' +
+        plural(assets.length, 'asset', 'assets') +
+        (scanned.partial ? ' (partial)' : ''),
       actions: [
         {
-          label: 'Delete ' + queue.length,
+          label: 'Delete ' + fmtInt(queue.length),
           kind: 'danger',
           onClick: () => {
             phase = 'run';
@@ -595,16 +678,13 @@
       const doneCount = deleted + failed;
       const remaining = total - doneCount;
       const perItem = doneCount > 0 ? elapsed / doneCount : 0;
-      setPanel({
-        state: 'run',
-        title: stopRequested ? 'Stopping…' : 'Deleting library',
-        lines: [
-          ['Progress', deleted + ' / ' + total + ' deleted'],
-          ['Failed', String(failed)],
-          ['Remaining', String(remaining)],
-          ['Elapsed', fmtSeconds(elapsed)],
-          ['ETA', doneCount > 2 ? '~' + fmtSeconds(perItem * remaining) : 'estimating…'],
-        ],
+      showToast({
+        tone: 'busy',
+        title: stopRequested ? 'Stopping…' : 'Deleting ' + fmtInt(deleted) + ' of ' + fmtInt(total),
+        detail:
+          fmtInt(failed) + ' failed · ' + fmtSeconds(elapsed) + ' elapsed · ' +
+          (doneCount > 2 ? '~' + fmtSeconds(perItem * remaining) + ' left' : 'estimating…'),
+        progress: { value: doneCount, max: total },
         actions: stopRequested ? [] : [stopAction],
       });
     };
@@ -652,19 +732,20 @@
       btn.textContent = 'Delete all';
     }
 
-    setPanel({
-      state: authStopped ? 'idle' : 'done',
-      title: authStopped ? 'Stopped: session expired' : stopRequested ? 'Stopped' : 'Done',
-      lines: [
-        ['Deleted', String(deleted)],
-        ['Failed', String(failed)],
-        ['Not attempted', String(Math.max(0, total - deleted - failed))],
-        ['Time', fmtSeconds(elapsed)],
-        ['Library mix', mix],
-      ],
+    showToast({
+      tone: authStopped ? 'error' : stopRequested ? 'confirm' : failed ? 'error' : 'success',
+      title: authStopped
+        ? 'Stopped: session expired'
+        : stopRequested
+          ? 'Stopped at ' + deleted
+          : failed
+            ? 'Finished with ' + failed + ' failed'
+            : 'Deleted ' + plural(deleted, 'item', 'items'),
+      detail: fmtInt(deleted) + ' deleted · ' + fmtInt(failed) + ' failed · ' + fmtSeconds(elapsed),
+      progress: { value: total - Math.max(0, total - deleted - failed), max: total },
       actions: [
         { label: 'Reload library', onClick: () => location.reload() },
-        { label: 'Close', onClick: hidePanel },
+        { label: 'Close', onClick: hideToast },
       ],
     });
   }
@@ -710,6 +791,10 @@
         filters: filtersLabel(),
       };
     },
+    // Development helpers: render a toast state without touching the library.
+    toast: showToast,
+    flashSuccess,
+    flashError,
     configure: (patch) => {
       applySettings({ ...settings, ...(patch || {}) });
       return { ...settings };

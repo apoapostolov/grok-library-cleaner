@@ -27,9 +27,9 @@ git clone https://github.com/apoapostolov/grok-library-cleaner.git
 
 ## What you get
 
-**Per-item delete.** A 26px trash glyph in the top-right corner of every tile. One click removes that asset. No menu, no dialog.
+**Per-item delete.** A 26px trash glyph in the top-right corner of every tile. One click removes that asset. No menu, no dialog, and a toast in the bottom-right confirms which file went.
 
-**Delete all.** Two clicks to arm, then a scan of the whole library and a summary panel with the queue size and a per-class breakdown. Nothing is deleted until you confirm with **Delete N**, and **Stop** is always one click away. The run reports progress, failures, elapsed time and a live ETA.
+**Delete all.** Two clicks to arm, then a scan of the whole library and a confirm toast showing the queue size and per-class breakdown. Nothing is deleted until you press **Delete N**. During the run the toast carries a live progress bar with the count, failures, elapsed time and ETA, plus a **Stop** button. Progress bar and counts are formatted, so 15,059 does not read as 15059.
 
 **Separate selectors** for images (`image.jpg`), edited images (`edited-image.jpg`), videos (`generated_video.mp4`) and other files, with an optional per-run cap for a first pass on a large library.
 
