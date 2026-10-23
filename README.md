@@ -10,6 +10,7 @@
   <img src="https://img.shields.io/badge/type-chrome_extension-4285F4" alt="Type: Chrome extension">
   <img src="https://img.shields.io/badge/manifest-v3-1f6feb" alt="Manifest V3">
   <img src="https://img.shields.io/badge/version-1.0-2fbf71" alt="Version 1.0">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-97ca00" alt="License: MIT"></a>
 </p>
 
 Grok keeps every image it generates. Removing them on `grok.com/library` means opening a hover menu and clicking through a confirmation dialog for each one. This extension adds a delete glyph to the corner of every tile, plus a **Delete all** button in the library header that scans the library, shows you exactly what it found, and then works through the queue at a human pace.
