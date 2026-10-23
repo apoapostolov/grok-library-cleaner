@@ -40,6 +40,9 @@
     includeOther: false,
     maxPerRun: 0,
     maxSizeMB: 0, // 0 = accept every size
+    downloadFirst: true, // save a copy before deleting
+    folder: 'GrokLibrary', // subfolder under the browser Downloads folder
+    savePrompts: true, // write a .md beside each file when a prompt exists
   };
 
   let settings = { ...DEFAULTS };
@@ -113,6 +116,9 @@
       includeOther: s.includeOther === true,
       maxPerRun: num(s.maxPerRun, 0, 0, 50000),
       maxSizeMB: num(s.maxSizeMB, 0, 0, 4096),
+      downloadFirst: s.downloadFirst !== false,
+      folder: String(s.folder || '').trim() || 'GrokLibrary',
+      savePrompts: s.savePrompts !== false,
     };
     if (settings.maxDelay < settings.minDelay) settings.maxDelay = settings.minDelay;
     if (settings.longPauseEveryMax < settings.longPauseEveryMin) {
@@ -427,6 +433,185 @@
     showToast({ tone: 'error', title, detail, autoHide: 6500 });
   }
 
+  // ------------------------------------------------------------- archiving
+
+  const PAD = (n) => String(n).padStart(2, '0');
+
+  function stampOf(iso) {
+    const d = iso ? new Date(iso) : new Date();
+    const when = isNaN(d) ? new Date() : d;
+    return (
+      when.getFullYear() +
+      '-' +
+      PAD(when.getMonth() + 1) +
+      '-' +
+      PAD(when.getDate()) +
+      '_' +
+      PAD(when.getHours()) +
+      PAD(when.getMinutes()) +
+      '-' +
+      PAD(when.getSeconds())
+    );
+  }
+
+  function slugOf(text, max = 50) {
+    return String(text || '')
+      .normalize('NFKD')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, max)
+      .replace(/-+$/g, '');
+  }
+
+  function fileKindOf(asset) {
+    const mime = String(asset.mimeType || '');
+    const name = String(asset.name || '');
+    if (mime.startsWith('video/')) return 'video';
+    if (/^edited-/i.test(name)) return 'edit';
+    if (mime.startsWith('image/')) return 'image';
+    return 'file';
+  }
+
+  function extOf(asset) {
+    const fromName = /\.([a-z0-9]{2,5})$/i.exec(String(asset.name || ''));
+    if (fromName) return fromName[1].toLowerCase();
+    const mime = String(asset.mimeType || '');
+    if (mime === 'image/png') return 'png';
+    if (mime === 'image/jpeg') return 'jpg';
+    if (mime === 'image/webp') return 'webp';
+    if (mime === 'video/mp4') return 'mp4';
+    return 'bin';
+  }
+
+  /* mediaGenInput is where the real prompt lives, keyed by generation kind. */
+  function promptOf(meta) {
+    const input = meta && meta.mediaGenInput;
+    if (!input || typeof input !== 'object') return '';
+    for (const key of Object.keys(input)) {
+      const branch = input[key];
+      if (branch && typeof branch.prompt === 'string' && branch.prompt.trim()) return branch.prompt.trim();
+    }
+    return '';
+  }
+
+  function genSummary(meta) {
+    const input = meta && meta.mediaGenInput;
+    if (!input || typeof input !== 'object') return '';
+    const branch = input[Object.keys(input)[0]] || {};
+    const bits = [];
+    if (branch.modelName) bits.push(branch.modelName);
+    if (branch.mode) bits.push('mode ' + branch.mode);
+    if (branch.aspectRatio) bits.push(branch.aspectRatio);
+    if (branch.duration) bits.push(branch.duration + 's');
+    if (branch.resolutionName) bits.push(branch.resolutionName);
+    if (branch.numOfImages) bits.push(branch.numOfImages + ' images');
+    if (Array.isArray(branch.inputAssets) && branch.inputAssets.length) {
+      bits.push(branch.inputAssets.length + (branch.inputAssets.length === 1 ? ' input' : ' inputs'));
+    }
+    return bits.join(' · ');
+  }
+
+  /* the saved file name */
+  function baseNameOf(asset, prompt) {
+    const stamp = stampOf(asset.createTime);
+    const kind = fileKindOf(asset);
+    const raw = String(asset.name || '').replace(/\.[^.]+$/, '');
+    // Grok's own file names say nothing a human needs, so they never become a slug.
+    const generic = /^(image|edited[-_ ]?image|generated[-_ ]?video|file)$/i.test(raw);
+    const slug = slugOf(prompt) || (generic ? '' : slugOf(raw));
+    const parts = [stamp, kind];
+    if (slug && slug !== kind) parts.push(slug);
+    parts.push(String(asset.assetId || '').slice(0, 8));
+    return parts.join('_');
+  }
+
+  function bytesLabel(n) {
+    if (!n) return 'unknown size';
+    if (n >= 1048576) return (n / 1048576).toFixed(2) + ' MB (' + fmtInt(n) + ' bytes)';
+    if (n >= 1024) return Math.round(n / 1024) + ' KB (' + fmtInt(n) + ' bytes)';
+    return n + ' bytes';
+  }
+
+  function mdFor(asset, meta, prompt, fileName) {
+    const created = asset.createTime ? new Date(asset.createTime) : null;
+    const url = asset.sourceConversationId ? 'https://grok.com/c/' + asset.sourceConversationId : '';
+    const headline = prompt.split('\n')[0];
+    const title = headline.length > 72 ? headline.slice(0, 71).trimEnd() + '…' : headline;
+    const lines = [
+      '# ' + title,
+      '',
+      '- File: ' + fileName,
+      '- Asset: ' + asset.assetId,
+      '- Type: ' + fileKindOf(asset) + ' (' + (asset.mimeType || 'unknown') + ')',
+      '- Size: ' + bytesLabel(Number(asset.sizeBytes) || 0),
+    ];
+    if (asset.width && asset.height) lines.push('- Dimensions: ' + asset.width + 'x' + asset.height);
+    if (created && !isNaN(created)) lines.push('- Created: ' + created.toISOString());
+    const gen = genSummary(meta);
+    if (gen) lines.push('- Generation: ' + gen);
+    if (url) lines.push('- Conversation: ' + url);
+    lines.push('- Library: https://grok.com/library', '', '## Prompt', '', '```text', prompt, '```', '');
+    return lines.join('\n');
+  }
+
+  async function assetMeta(id) {
+    const res = await fetch('/rest/assets/' + encodeURIComponent(id), {
+      credentials: 'include',
+      headers: { accept: 'application/json' },
+    });
+    if (!res.ok) throw new Error('metadata HTTP ' + res.status);
+    return res.json();
+  }
+
+  /* Save a copy, then say whether the delete may proceed. */
+  async function archiveAsset(asset) {
+    if (!settings.downloadFirst) return { ok: true, skipped: true };
+    if (!chrome.runtime || !chrome.runtime.sendMessage) {
+      return { ok: false, error: 'extension context missing, reload the page' };
+    }
+
+    let full = asset;
+    let meta = null;
+    if (settings.savePrompts || !asset.key) {
+      try {
+        meta = await assetMeta(asset.assetId);
+        full = Object.assign({}, asset, meta);
+      } catch (err) {
+        if (!asset.key) return { ok: false, error: 'no metadata: ' + err.message };
+      }
+    }
+    if (!full.key) return { ok: false, error: 'asset has no storage key' };
+
+    const prompt = promptOf(meta);
+    const base = baseNameOf(full, prompt);
+    const folder = String(settings.folder || 'GrokLibrary').replace(/^\/+|\/+$/g, '');
+    const dir = folder + '/' + base.slice(0, 10);
+    const file = base + '.' + extOf(full);
+
+    try {
+      const res = await chrome.runtime.sendMessage({
+        type: 'glc-save',
+        url: 'https://assets.grok.com/' + full.key,
+        path: dir + '/' + file,
+        expectedSize: Number(full.sizeBytes) || 0,
+        md: prompt ? mdFor(full, meta, prompt, file) : '',
+        mdPath: dir + '/' + base + '.md',
+      });
+      if (!res) return { ok: false, error: 'background did not answer' };
+      return res.ok
+        ? { ok: true, path: res.path, md: res.md }
+        : { ok: false, error: res.error || 'download failed' };
+    } catch (err) {
+      return { ok: false, error: String((err && err.message) || err) };
+    }
+  }
+
+  function shortPath(path) {
+    const parts = String(path || '').split(/[\\/]/);
+    return parts.slice(-2).join('/');
+  }
+
   // ----------------------------------------------------------- tile glyph
 
   function addGlyph(tileButton) {
@@ -449,11 +634,26 @@
         event.stopPropagation();
         if (glyph.dataset.busy === '1') return;
         glyph.dataset.busy = '1';
+
+        const saved = await archiveAsset({ assetId: id });
+        if (!saved.ok) {
+          glyph.dataset.busy = '0';
+          glyph.dataset.error = '1';
+          setTimeout(() => {
+            delete glyph.dataset.error;
+          }, 700);
+          flashError('Not saved, not deleted', saved.error);
+          return;
+        }
+
         const res = await deleteWithRetry(id);
         if (res.ok) {
           const name = tileButton.getAttribute('aria-label') || 'item';
           hideTile(tile);
-          flashSuccess('Deleted ' + name, res.gone ? 'It was already gone' : 'Removed from the library');
+          flashSuccess(
+            'Deleted ' + name,
+            saved.path ? 'Saved to ' + shortPath(saved.path) : res.gone ? 'It was already gone' : 'Removed'
+          );
           return;
         }
         glyph.dataset.busy = '0';
@@ -655,7 +855,10 @@
         ' · scanned ' +
         plural(assets.length, 'asset', 'assets') +
         (scanned.partial ? ' (partial)' : '') +
-        (tooBig ? ' · skipping ' + fmtInt(tooBig) + ' over ' + settings.maxSizeMB + ' MB' : ''),
+        (tooBig ? ' · skipping ' + fmtInt(tooBig) + ' over ' + settings.maxSizeMB + ' MB' : '') +
+        (settings.downloadFirst
+          ? ' · saving to Downloads/' + settings.folder
+          : ' · no copies saved'),
       actions: [
         {
           label: 'Delete ' + fmtInt(queue.length),
@@ -682,6 +885,9 @@
     const startedAt = Date.now();
     let deleted = 0;
     let failed = 0;
+    let savedCount = 0;
+    let unsaved = 0;
+    let lastUnsaved = '';
     let authStopped = false;
     const total = queue.length;
 
@@ -696,7 +902,11 @@
         tone: 'busy',
         title: stopRequested ? 'Stopping…' : 'Deleting ' + fmtInt(deleted) + ' of ' + fmtInt(total),
         detail:
-          fmtInt(failed) + ' failed · ' + fmtSeconds(elapsed) + ' elapsed · ' +
+          (settings.downloadFirst ? fmtInt(savedCount) + ' saved · ' : '') +
+          fmtInt(failed) +
+          ' failed · ' +
+          fmtSeconds(elapsed) +
+          ' elapsed · ' +
           (doneCount > 2 ? '~' + fmtSeconds(perItem * remaining) + ' left' : 'estimating…'),
         progress: { value: doneCount, max: total },
         actions: stopRequested ? [] : [stopAction],
@@ -711,7 +921,8 @@
     for (let i = 0; i < queue.length; i += 1) {
       if (stopRequested) break;
       const asset = queue[i];
-      const res = await deleteWithRetry(asset.assetId);
+      const saved = await archiveAsset(asset);
+      const res = saved.ok ? await deleteWithRetry(asset.assetId) : { ok: false, unsaved: saved.error };
 
       if (res.stopped) break;
       if (res.auth) {
@@ -720,9 +931,14 @@
       }
       if (res.ok) {
         deleted += 1;
+        if (saved.path) savedCount += 1;
         removeTileById(asset.assetId);
       } else {
         failed += 1;
+        if (res.unsaved) {
+          unsaved += 1;
+          lastUnsaved = res.unsaved;
+        }
       }
       render();
 
@@ -755,7 +971,14 @@
           : failed
             ? 'Finished with ' + failed + ' failed'
             : 'Deleted ' + plural(deleted, 'item', 'items'),
-      detail: fmtInt(deleted) + ' deleted · ' + fmtInt(failed) + ' failed · ' + fmtSeconds(elapsed),
+      detail:
+        (settings.downloadFirst ? fmtInt(savedCount) + ' saved · ' : '') +
+        fmtInt(deleted) +
+        ' deleted · ' +
+        fmtInt(failed) +
+        ' failed · ' +
+        fmtSeconds(elapsed) +
+        (unsaved ? ' · ' + fmtInt(unsaved) + ' kept back: ' + lastUnsaved : ''),
       progress: { value: total - Math.max(0, total - deleted - failed), max: total },
       actions: [
         { label: 'Reload library', onClick: () => location.reload() },
@@ -804,7 +1027,25 @@
         queue: targets.length,
         tooBig,
         maxSizeMB: settings.maxSizeMB,
+        downloadFirst: settings.downloadFirst,
+        folder: settings.folder,
         filters: filtersLabel(),
+      };
+    },
+    // Development helper: resolve naming, prompt and .md without downloading.
+    archivePreview: async (id) => {
+      const meta = await assetMeta(id);
+      const prompt = promptOf(meta);
+      const base = baseNameOf(meta, prompt);
+      const file = base + '.' + extOf(meta);
+      const day = base.slice(0, 10);
+      return {
+        file,
+        path: settings.folder + '/' + day + '/' + file,
+        mdPath: prompt ? settings.folder + '/' + day + '/' + base + '.md' : null,
+        prompt,
+        generation: genSummary(meta),
+        md: prompt ? mdFor(meta, meta, prompt, file) : '',
       };
     },
     // Development helpers: render a toast state without touching the library.

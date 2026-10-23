@@ -4,7 +4,7 @@
 
 <h1 align="center">Grok Library Cleaner</h1>
 
-<p align="center">Clear your Grok image library one item at a time, or in one paced sweep.</p>
+<p align="center">Before unsubscribing from Grok, remember to download and wipe out your creations.</p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/type-chrome_extension-4285F4" alt="Type: Chrome extension">
@@ -35,6 +35,25 @@ git clone https://github.com/apoapostolov/grok-library-cleaner.git
 
 **Size guard.** "Skip files larger than N MB" keeps big renders out of a bulk purge. `sizeBytes` ships with every list row, so the guard adds no requests and no scanning time. It applies while the queue is built, before anything is deleted, and the confirm toast reports how many matches were spared. On a sample of 600 recent assets, a 1 MB cap spared 1.4% of plain images and 100% of videos. The per-tile glyph still deletes whatever you click, cap or no cap, because that click is explicit.
 
+## Keep a copy before it goes
+
+Turn on **Save a copy before deleting** and every item is downloaded to disk before its delete request is sent. The folder is set in the popup and lives inside your browsers Downloads folder, for example `Downloads/GrokLibrary/2026-10-21/`.
+
+Files are named from the asset itself, so they read like a person filed them:
+
+```
+2026-10-18_2143-07_image_sunlit-portrait-unbuttoned-linen-shirt_7c41ba2e.jpg
+2026-10-14_1912-55_edit_warmer-golden-hour-bare-shoulder_52d90f6b.jpg
+```
+
+That is the creation timestamp in local time, the kind (image, edit, video, file), a slug of the prompt, and the first eight characters of the asset id so a duplicate can always be traced back.
+
+**Prompts are saved too.** Grok keeps the generation input on each asset, so the extension reads it and writes a matching `.md` beside the file: the prompt in a fenced block, plus size, dimensions, creation time, model, mode, aspect ratio and a link back to the conversation. Assets that have no prompt, such as your own uploads, get no `.md`.
+
+Naming and prompt lookup cost one extra `GET /rest/assets/<id>` per item. A save only counts as done when the file finished and its byte size matches what the API reported, so an error page posing as a download can never authorise a delete. If a save fails, that item stays in the library and is reported in the summary.
+
+**Test download** in the popup writes a small text file to the chosen folder and reports the exact path, so you can confirm the path works before committing to a long run.
+
 ## Pacing
 
 The library endpoints rate limit, and the limiter answers `429` with no `Retry-After` header, so the extension spaces its own work:
@@ -54,13 +73,15 @@ All of it is adjustable in the toolbar popup.
 The extension drives the same REST endpoints the page uses, with your existing session cookies:
 
 - `GET /rest/assets` lists the library, newest first, paginated by `pageToken`.
+- `GET /rest/assets/<assetId>` returns one asset, including `mediaGenInput` with the prompt and generation settings.
 - `DELETE /rest/assets-metadata/<assetId>` removes one asset.
+- `https://assets.grok.com/<key>` serves the file itself. It answers `403` without your session cookies, so downloads go through Chrome's download manager rather than a fetch.
 
 The page also fires `POST /rest/media/post/delete` before deleting a tile and that endpoint answers `404` for library assets, so it is a no-op worth ignoring.
 
 Tiles are found by `button[data-library-item-id]`, which carries the asset id. A `MutationObserver` keeps the glyphs in place across infinite scroll and client-side re-renders.
 
-The extension has no backend, no analytics, and makes no requests anywhere except `grok.com`.
+The extension has no backend and no analytics. It talks to `grok.com` for the library and to `assets.grok.com` for the files, and needs the `downloads` permission for the copies.
 
 ## Notes
 

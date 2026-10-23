@@ -12,6 +12,9 @@ const DEFAULTS = {
   includeOther: false,
   maxPerRun: 0,
   maxSizeMB: 0,
+  downloadFirst: true,
+  folder: 'GrokLibrary',
+  savePrompts: true,
 };
 
 const NUMBER_FIELDS = [
@@ -25,7 +28,24 @@ const NUMBER_FIELDS = [
   ['maxSizeMB', 'maxSizeMB'],
 ];
 
-const CHECKBOXES = ['includePlain', 'includeEdited', 'includeVideos', 'includeOther'];
+const CHECKBOXES = [
+  'includePlain',
+  'includeEdited',
+  'includeVideos',
+  'includeOther',
+  'downloadFirst',
+  'savePrompts',
+];
+
+/* Downloads land under Downloads/<folder>, so keep it to one plain path segment. */
+function cleanFolder(value) {
+  const cleaned = String(value || '')
+    .replace(/[<>:"\\|?*]/g, '')
+    .replace(/^[.\/\s]+|[.\/\s]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .slice(0, 60);
+  return cleaned || DEFAULTS.folder;
+}
 
 function fill(settings) {
   const s = { ...DEFAULTS, ...(settings || {}) };
@@ -35,7 +55,8 @@ function fill(settings) {
     if (s.includeEdited === undefined) s.includeEdited = s.includeImages !== false;
   }
   for (const [key, id] of NUMBER_FIELDS) document.getElementById(id).value = s[key];
-  for (const key of CHECKBOXES) document.getElementById(key).checked = s[key] === true;
+  for (const key of CHECKBOXES) document.getElementById(key).checked = s[key] !== false && s[key] === true;
+  document.getElementById('folder').value = s.folder || DEFAULTS.folder;
 }
 
 function read() {
@@ -51,6 +72,7 @@ function read() {
     maxSizeMB: Math.min(4096, Math.max(0, Math.round((v('maxSizeMB') || 0) * 10) / 10)),
   };
   for (const key of CHECKBOXES) out[key] = document.getElementById(key).checked;
+  out.folder = cleanFolder(document.getElementById('folder').value);
   if (out.maxDelay < out.minDelay) out.maxDelay = out.minDelay;
   if (out.longPauseEveryMax < out.longPauseEveryMin) out.longPauseEveryMax = out.longPauseEveryMin;
   if (out.longPauseMax < out.longPauseMin) out.longPauseMax = out.longPauseMin;
@@ -75,3 +97,18 @@ for (const [, id] of NUMBER_FIELDS) {
     if (e.key === 'Enter') document.getElementById('save').click();
   });
 }
+
+/* Proves the download path really works for the chosen folder. */
+document.getElementById('selftest').addEventListener('click', async () => {
+  const status = document.getElementById('status');
+  const folder = cleanFolder(document.getElementById('folder').value);
+  status.textContent = 'Testing downloads in ' + folder + '…';
+  try {
+    const res = await chrome.runtime.sendMessage({ type: 'glc-selftest', folder });
+    status.textContent = res && res.ok
+      ? 'Saved ' + res.path
+      : 'Failed: ' + ((res && res.error) || 'no answer from the extension');
+  } catch (err) {
+    status.textContent = 'Failed: ' + String((err && err.message) || err);
+  }
+});
