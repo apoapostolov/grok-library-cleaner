@@ -21,7 +21,7 @@ That order is the point. You leave with your work instead of a folder of untitle
   <img src="assets/popup.png" width="308" alt="Grok Library Cleaner settings popup: wait and break pacing, per-run and size caps, type filters, and the save-copy options with a folder name and prompt sidecars">
 </p>
 
-<p align="center"><sub>The settings popup, at its real size.</sub></p>
+<p align="center"><sub>The settings popup at its real size, with saving turned on.</sub></p>
 
 ## Install
 
