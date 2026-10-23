@@ -6,7 +6,7 @@
       :root { color-scheme: dark; }
       body {
         margin: 0;
-        width: 280px;
+        width: 360px;
         padding: 14px;
         background: #141417;
         color: #f2f2f4;
@@ -17,17 +17,25 @@
       h1 { font-size: 13px; margin: 0; font-weight: 650; }
       p.hint { margin: 0 0 12px; color: #9a9aa3; font-size: 12px; }
       label { display: block; margin: 10px 0 4px; color: #b7b7bf; font-size: 12px; }
-      .row { display: flex; align-items: center; gap: 6px; }
-      input[type="number"] {
-        flex: 1;
-        min-width: 0;
-        height: 28px;
-        padding: 0 8px;
-        border-radius: 8px;
+      .field {
+        margin: 10px 0 0;
+        color: #b7b7bf;
+        font-size: 12px;
+        line-height: 1.9;
+      }
+      .field input {
+        box-sizing: border-box;
+        width: 60px;
+        height: 26px;
+        margin: 0 3px;
+        padding: 0 6px;
+        border-radius: 7px;
         border: 1px solid #2e2e34;
         background: #1c1c21;
         color: #f2f2f4;
         font: inherit;
+        font-size: 12px;
+        text-align: center;
       }
       input[type="checkbox"] { width: 14px; height: 14px; accent-color: #d93a3f; }
       .check { display: flex; align-items: center; gap: 8px; margin-top: 12px; color: #d8d8de; }
@@ -53,22 +61,22 @@
     </div>
     <p class="hint">Pick what Delete all touches, and how fast it works. Timing is randomised per item.</p>
 
-    <label for="minDelay">Gap min (ms)</label>
-    <div class="row"><input id="minDelay" type="number" min="300" step="50" /></div>
-
-    <label for="maxDelay">Gap max (ms)</label>
-    <div class="row"><input id="maxDelay" type="number" min="300" step="50" /></div>
-
-    <label for="every">Long break every N–M items</label>
-    <div class="row">
-      <input id="every" type="number" min="2" step="1" />
-      <input id="everyMax" type="number" min="2" step="1" />
+    <div class="field">
+      Wait between
+      <input id="minDelay" type="number" min="300" step="50" aria-label="Fewest milliseconds between deletes" /> and
+      <input id="maxDelay" type="number" min="300" step="50" aria-label="Most milliseconds between deletes" /> ms per delete
     </div>
 
-    <label for="pause">Long break min / max (ms)</label>
-    <div class="row">
-      <input id="pause" type="number" min="1000" step="250" />
-      <input id="pauseMax" type="number" min="1000" step="250" />
+    <div class="field">
+      Long break between
+      <input id="every" type="number" min="2" step="1" aria-label="Fewest items between long breaks" /> and
+      <input id="everyMax" type="number" min="2" step="1" aria-label="Most items between long breaks" /> items
+    </div>
+
+    <div class="field">
+      Break lasts between
+      <input id="pause" type="number" min="1000" step="250" aria-label="Shortest long break in milliseconds" /> and
+      <input id="pauseMax" type="number" min="1000" step="250" aria-label="Longest long break in milliseconds" /> ms
     </div>
 
     <div class="check">
@@ -88,12 +96,16 @@
       <label for="includeOther" style="margin: 0">Other files</label>
     </div>
 
-    <label for="maxPerRun">Max per run (0 = no limit)</label>
-    <div class="row"><input id="maxPerRun" type="number" min="0" step="10" /></div>
+    <div class="field">
+      Delete at most
+      <input id="maxPerRun" type="number" min="0" step="10" aria-label="Most items per run, 0 for no limit" /> items per run
+    </div>
 
-    <label for="maxSizeMB">Skip files larger than (MB, 0 = no limit)</label>
-    <div class="row"><input id="maxSizeMB" type="number" min="0" step="0.5" /></div>
-    <p class="hint" style="margin: 6px 0 0">1 MB protects most full size renders. The size ships with every list row, so this adds no requests.</p>
+    <div class="field">
+      Skip files larger than
+      <input id="maxSizeMB" type="number" min="0" step="0.5" aria-label="Skip files larger than this many megabytes, 0 for no limit" /> MB
+    </div>
+    <p class="hint" style="margin: 6px 0 0">0 means no limit on either cap.</p>
 
     <button id="save">Save</button>
     <div id="status"></div>
