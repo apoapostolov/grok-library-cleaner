@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/icon-128.png" width="104" height="104" alt="Grok Library Cleaner icon: a white bin swallowing a red X">
+  <img src="assets/hero.png" width="190" height="190" alt="Grok Library Cleaner: a metal bin with its lid open, with the Grok logo going in">
 </p>
 
 <h1 align="center">Grok Library Cleaner</h1>
