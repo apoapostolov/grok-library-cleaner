@@ -4,7 +4,7 @@
 
 <h1 align="center">Grok Library Cleaner</h1>
 
-<p align="center">Before deleting your account and leaving Grok, download your creations and then clear them out.</p>
+<p align="center">Before deleting your account and leaving Grok, download and wipe your creations.</p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/type-chrome_extension-4285F4" alt="Type: Chrome extension">
