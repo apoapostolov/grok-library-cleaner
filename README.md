@@ -57,6 +57,8 @@ Chrome loads unpacked extensions from a folder, never from an archive, so the sa
 
 **Size guard.** *Skip files over N MB* keeps big renders out of a bulk purge. `sizeBytes` ships with every list row, so the guard adds no requests and no scanning time. It applies while the queue is built, before anything is deleted, and the confirm toast reports how many matches were spared. On a sample of 600 recent assets, a 1 MB cap spared 1.4% of plain images and 100% of videos. The per-tile glyph still deletes whatever you click, cap or no cap, because that click is explicit.
 
+**Age filter.** *Only delete files younger than* takes a compact age such as `1d 6h`, `3m` or `2y 1m 3d`, any mix of years, months, weeks, days and hours. Everything older is spared, so a run can clear the last day of experiments and leave the rest of the library alone. The field starts empty and its dim placeholder shows the format rather than a value. An age the extension cannot read stops the run before anything is scanned, and the confirmation names the filter and how many files it spared.
+
 ## Keep a copy before it goes
 
 Saving is off until you turn it on, and the folder field starts empty. Name a folder and copies land sorted by creation day, for example `Downloads/GrokLibrary/2026-10-21/`. Leave the field empty and the day folders sit straight in Downloads, at `Downloads/2026-10-21/`.

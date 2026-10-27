@@ -18,7 +18,7 @@
       p.hint { margin: 0; color: #9a9aa3; font-size: 12px; }
       p.subtitle { margin: 2px 0 0; color: #9a9aa3; font-size: 11.5px; line-height: 1.4; }
       p.hint.spaced { margin: 4px 0 0; }
-      .field { margin: 4px 0 0; color: #b7b7bf; font-size: 12px; }
+      .field { margin: 3px 0 0; color: #b7b7bf; font-size: 12px; }
       .field .label { display: block; }
       .field .range { display: flex; align-items: center; gap: 6px; color: #9a9aa3; }
       input[type="number"] {
@@ -47,8 +47,9 @@
         font: inherit;
         font-size: 12px;
       }
+      input::placeholder { color: #61616a; }
       input[type="checkbox"] { width: 14px; height: 14px; margin: 0; accent-color: #d93a3f; flex: 0 0 auto; }
-      .grid2 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px 8px; margin-top: 6px; }
+      .grid2 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px 8px; margin-top: 5px; }
       .caps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px 8px; margin-top: 5px; }
       .caps .field { margin: 0; }
       .caps input[type="number"] { width: 48px; }
@@ -63,13 +64,15 @@
         font-size: 12px;
       }
       .caps .wide .unit { color: #9a9aa3; font-size: 11px; white-space: nowrap; }
+      .caps .wide .label { flex: 0 0 auto; }
+      .caps .wide input[type="text"] { flex: 1 1 auto; width: auto; min-width: 0; height: 26px; font-size: 12px; }
       .check { display: flex; align-items: center; gap: 7px; color: #d8d8de; font-size: 12px; }
       .check label { margin: 0; }
-      .divider { height: 1px; margin: 5px 0 0; background: #26262c; }
+      .divider { height: 1px; margin: 4px 0 0; background: #26262c; }
       .actions { display: flex; gap: 8px; margin-top: 7px; }
       button {
         flex: 1;
-        height: 28px;
+        height: 26px;
         border-radius: 9px;
         border: 1px solid #3a3a42;
         background: #232329;
@@ -90,7 +93,7 @@
         color: #ffd9db;
       }
       button.danger:hover { background: #352025; border-color: #5f2f39; }
-      #status { margin-top: 4px; font-size: 11.5px; color: #8b8b93; min-height: 12px; word-break: break-word; }
+      #status { margin-top: 3px; font-size: 11.5px; color: #8b8b93; min-height: 12px; word-break: break-word; }
     </style>
   </head>
   <body>
@@ -153,12 +156,16 @@
         </div>
       </div>
       <div class="wide">
-        <span class="label">Ask to stop after</span>
+        <span class="label" title="A candidate is an asset your type filters and size cap would actually queue">Ask to stop after</span>
         <input id="stopAfterNoCandidates" type="number" min="0" step="1" aria-label="Ask to stop after this many pages with no candidates, 0 to never ask" />
         <span class="unit">pages with no candidates</span>
       </div>
+      <div class="wide">
+        <span class="label">Only delete files younger than</span>
+        <input id="youngerThan" type="text" spellcheck="false" placeholder="Xy Xm Xd Xh" aria-label="Only delete files younger than this age, for example 1d 6h or 2m. Clear it for every age." />
+      </div>
     </div>
-    <p class="hint spaced">0 means no limit, and never asks. A candidate is an asset your filters and size cap would queue.</p>
+    <p class="hint spaced">0 means no limit, and never asks to stop.</p>
 
     <div class="grid2">
       <div class="check">
@@ -189,7 +196,7 @@
 
     <div class="divider"></div>
 
-    <div class="check" style="margin-top: 7px">
+    <div class="check" style="margin-top: 6px">
       <input id="downloadFirst" type="checkbox" />
       <label for="downloadFirst">Save a copy before deleting</label>
     </div>
@@ -199,7 +206,7 @@
       <input id="folder" type="text" spellcheck="false" placeholder="(no subfolder)" aria-label="Folder name inside the Downloads folder, leave empty to save straight into Downloads" />
     </div>
 
-    <div class="check" style="margin-top: 6px">
+    <div class="check" style="margin-top: 5px">
       <input id="savePrompts" type="checkbox" checked />
       <label for="savePrompts">Save the prompt as a .md beside each file</label>
     </div>

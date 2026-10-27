@@ -14,6 +14,7 @@ const DEFAULTS = {
   maxSizeMB: 0,
   maxScanPages: 0,
   stopAfterNoCandidates: 0,
+  youngerThan: '',
   removeSessions: false,
   removeProjects: false,
   downloadFirst: false,
@@ -44,6 +45,24 @@ const CHECKBOXES = [
   'downloadFirst',
   'savePrompts',
 ];
+
+/* Mirrors content.js parseAge: empty is 0, unreadable is -1. Used to refuse a typo. */
+function parseAge(text) {
+  const t = String(text || '').trim().toLowerCase();
+  if (!t) return 0;
+  const units = { y: 31536000000, m: 2592000000, mo: 2592000000, w: 604800000, d: 86400000, h: 3600000 };
+  const token = /(\d+(?:\.\d+)?)\s*(mo|y|m|w|d|h)/g;
+  let total = 0;
+  let seen = false;
+  let m;
+  while ((m = token.exec(t))) {
+    total += parseFloat(m[1]) * units[m[2]];
+    seen = true;
+  }
+  const leftover = t.replace(/(\d+(?:\.\d+)?)\s*(mo|y|m|w|d|h)/g, '').replace(/[\s,]+/g, '');
+  if (!seen || leftover || total <= 0) return -1;
+  return total;
+}
 
 /* Downloads land under Downloads/<folder>, so keep it to one plain path segment. */
 function cleanFolder(value) {
@@ -79,6 +98,7 @@ function fill(settings) {
   for (const [key, id] of NUMBER_FIELDS) document.getElementById(id).value = s[key];
   for (const key of CHECKBOXES) document.getElementById(key).checked = s[key] !== false && s[key] === true;
   document.getElementById('folder').value = s.folder || '';
+  document.getElementById('youngerThan').value = s.youngerThan || '';
   syncSave(s);
 }
 
@@ -98,6 +118,11 @@ function read() {
   };
   for (const key of CHECKBOXES) out[key] = document.getElementById(key).checked;
   out.folder = cleanFolder(document.getElementById('folder').value);
+  out.youngerThan = document
+    .getElementById('youngerThan')
+    .value.trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
   if (out.maxDelay < out.minDelay) out.maxDelay = out.minDelay;
   if (out.longPauseEveryMax < out.longPauseEveryMin) out.longPauseEveryMax = out.longPauseEveryMin;
   if (out.longPauseMax < out.longPauseMin) out.longPauseMax = out.longPauseMin;
@@ -118,6 +143,10 @@ if (store) {
 document.getElementById('save').addEventListener('click', async () => {
   const settings = read();
   const status = document.getElementById('status');
+  if (settings.youngerThan && parseAge(settings.youngerThan) < 0) {
+    status.textContent = 'Age: use a value like 1d 6h, or leave it empty.';
+    return;
+  }
   if (!store) {
     status.textContent = 'Storage is unavailable in this context.';
     return;
@@ -128,6 +157,10 @@ document.getElementById('save').addEventListener('click', async () => {
   setTimeout(() => {
     status.textContent = '';
   }, 3000);
+});
+
+document.getElementById('youngerThan').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('save').click();
 });
 
 for (const [, id] of NUMBER_FIELDS) {
@@ -153,6 +186,10 @@ document.getElementById('delall').addEventListener('click', async () => {
     settings.includeOther;
   if (!anyType) {
     status.textContent = 'Turn on at least one type first.';
+    return;
+  }
+  if (settings.youngerThan && parseAge(settings.youngerThan) < 0) {
+    status.textContent = 'Age: use a value like 1d 6h, or leave it empty.';
     return;
   }
   if (store) await store.set({ settings });

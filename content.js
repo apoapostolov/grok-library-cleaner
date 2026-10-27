@@ -42,6 +42,7 @@
     maxSizeMB: 0, // 0 = accept every size
     maxScanPages: 0, // 0 = walk every page the list has
     stopAfterNoCandidates: 0, // 0 = never ask to stop early
+    youngerThan: '', // age filter: only delete newer assets, empty = every age
     removeSessions: false, // chats and sessions, off by default
     removeProjects: false, // projects (workspaces), off by default
     downloadFirst: false, // opt in: save a copy before deleting
@@ -122,6 +123,7 @@
       maxSizeMB: num(s.maxSizeMB, 0, 0, 4096),
       maxScanPages: num(s.maxScanPages, 0, 0, 10000),
       stopAfterNoCandidates: num(s.stopAfterNoCandidates, 0, 0, 10000),
+      youngerThan: String(s.youngerThan || '').trim(),
       removeSessions: s.removeSessions === true,
       removeProjects: s.removeProjects === true,
       downloadFirst: s.downloadFirst === true,
@@ -327,17 +329,64 @@
 
   const sizeCap = () => (settings.maxSizeMB > 0 ? settings.maxSizeMB * 1024 * 1024 : 0);
 
+  /**
+   * The age field reads "1y 2m 3d 4h": any subset, any order, spaces or commas between
+   * parts. Empty means the filter is off (0) and text that cannot be read returns -1, so a
+   * typo refuses the run instead of quietly widening it to every age.
+   */
+  const AGE_UNITS = {
+    y: 365 * 86400000,
+    m: 30 * 86400000,
+    mo: 30 * 86400000,
+    w: 7 * 86400000,
+    d: 86400000,
+    h: 3600000,
+  };
+  const AGE_TOKEN = /(\d+(?:\.\d+)?)\s*(mo|y|m|w|d|h)/g;
+
+  function parseAge(text) {
+    const t = String(text || '').trim().toLowerCase();
+    if (!t) return 0;
+    let total = 0;
+    let seen = false;
+    let m;
+    AGE_TOKEN.lastIndex = 0;
+    while ((m = AGE_TOKEN.exec(t))) {
+      total += parseFloat(m[1]) * AGE_UNITS[m[2]];
+      seen = true;
+    }
+    const leftover = t.replace(/(\d+(?:\.\d+)?)\s*(mo|y|m|w|d|h)/g, '').replace(/[\s,]+/g, '');
+    if (!seen || leftover || total <= 0) return -1;
+    return total;
+  }
+
+  /* 0 when the filter is off or unreadable; startScan refuses an unreadable value first. */
+  function ageCutoff() {
+    const ms = parseAge(settings.youngerThan);
+    return ms > 0 ? Date.now() - ms : 0;
+  }
+
   function classify(assets) {
     const chosen = { plain: 0, edited: 0, video: 0, other: 0 };
     const counts = { plain: 0, edited: 0, video: 0, other: 0 };
     const targets = [];
     const cap = sizeCap();
+    const cutoff = ageCutoff();
     let tooBig = 0;
+    let tooOld = 0;
     for (const a of assets) {
       if (!a || a.isDeleted) continue;
       const cls = classOf(a);
       counts[cls] += 1;
       if (!selected(a)) continue;
+      // createTime ships with every list row too, so the age filter is just a comparison
+      if (cutoff) {
+        const made = Date.parse(a.createTime);
+        if (!Number.isFinite(made) || made < cutoff) {
+          tooOld += 1;
+          continue;
+        }
+      }
       // sizeBytes ships with every list row, so the cap costs no extra request
       if (cap && (Number(a.sizeBytes) || 0) > cap) {
         tooBig += 1;
@@ -346,7 +395,7 @@
       chosen[cls] += 1;
       targets.push(a);
     }
-    return { counts, chosen, targets, tooBig };
+    return { counts, chosen, targets, tooBig, tooOld };
   }
 
   const mixShort = (c) =>
@@ -369,6 +418,7 @@
     if (settings.includeEdited) parts.push('edited');
     if (settings.includeVideos) parts.push('videos');
     if (settings.includeOther) parts.push('files');
+    if (settings.youngerThan) parts.push('younger than ' + settings.youngerThan);
     return parts.join(' + ') || 'nothing selected';
   }
 
@@ -996,6 +1046,13 @@
       flashError('Nothing selected', 'Turn on chats, projects, images, videos or files in the popup.');
       return;
     }
+    if (settings.youngerThan && parseAge(settings.youngerThan) < 0) {
+      flashError(
+        'Could not read the age filter',
+        '"' + settings.youngerThan + '" is not an age. Use something like 1d 6h, or clear the field.'
+      );
+      return;
+    }
 
     phase = 'scan';
     stopRequested = false;
@@ -1019,6 +1076,7 @@
     let noCandidateStreak = 0;
     let chatsInProjects = 0;
     let tooBig = 0;
+    let tooOld = 0;
     const queue = [];
     const room = () => (limit > 0 ? Math.max(0, limit - queue.length) : Infinity);
 
@@ -1113,6 +1171,7 @@
         noCandidateStreak = res.noCandidateStreak || 0;
         const built = classify(assets);
         tooBig = built.tooBig;
+        tooOld = built.tooOld;
         for (const a of built.targets) {
           if (room() <= 0) break;
           queue.push(assetEntry(a));
@@ -1149,12 +1208,15 @@
     if (!queue.length) {
       phase = 'idle';
       resetHeaderButton();
+      const spared = [];
+      if (tooBig) spared.push(plural(tooBig, 'match', 'matches') + ' over ' + settings.maxSizeMB + ' MB');
+      if (tooOld) spared.push(plural(tooOld, 'match', 'matches') + ' older than ' + settings.youngerThan);
       showToast({
         tone: 'success',
         title: 'Nothing to delete',
         detail:
-          tooBig && !queue.length
-            ? 'all ' + plural(tooBig, 'match', 'matches') + ' are over ' + settings.maxSizeMB + ' MB'
+          spared.length
+            ? 'all of them spared: ' + spared.join(', ')
             : mixShort(queueCounts) +
               ' · filters: ' +
               filtersLabel() +
@@ -1171,6 +1233,8 @@
         mixShort(queueCounts) +
         (chatsInProjects ? ' · ' + fmtInt(chatsInProjects) + ' in projects kept' : '') +
         (tooBig ? ' · skipping ' + fmtInt(tooBig) + ' over ' + settings.maxSizeMB + ' MB' : '') +
+        (settings.youngerThan ? ' · only younger than ' + settings.youngerThan : '') +
+        (tooOld ? ' · skipping ' + fmtInt(tooOld) + ' older' : '') +
         (hasAssets
           ? settings.downloadFirst
             ? ' · saving to ' + (settings.folder ? 'Downloads/' + settings.folder : 'Downloads')
@@ -1341,7 +1405,7 @@
     list: listAllAssets,
     preview: async () => {
       const res = await listAllAssets(null, null, { maxPages: settings.maxScanPages });
-      const { counts, chosen, targets, tooBig } = classify(res.assets);
+      const { counts, chosen, targets, tooBig, tooOld } = classify(res.assets);
       return {
         scanned: res.assets.length,
         pages: res.pages,
@@ -1351,6 +1415,8 @@
         chosen,
         queue: targets.length,
         tooBig,
+        tooOld,
+        youngerThan: settings.youngerThan,
         maxSizeMB: settings.maxSizeMB,
         downloadFirst: settings.downloadFirst,
         folder: settings.folder,
