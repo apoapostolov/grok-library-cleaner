@@ -6,7 +6,7 @@
       :root { color-scheme: dark; }
       body {
         margin: 0;
-        width: 280px;
+        width: 314px;
         padding: 13px;
         background: #141417;
         color: #f2f2f4;
@@ -18,12 +18,9 @@
       p.hint { margin: 0; color: #9a9aa3; font-size: 12px; }
       p.subtitle { margin: 2px 0 0; color: #9a9aa3; font-size: 11.5px; line-height: 1.4; }
       p.hint.spaced { margin: 4px 0 0; }
-      .field { margin: 5px 0 0; color: #b7b7bf; font-size: 12px; }
-      .field .label { display: block; margin-bottom: 2px; }
+      .field { margin: 4px 0 0; color: #b7b7bf; font-size: 12px; }
+      .field .label { display: block; }
       .field .range { display: flex; align-items: center; gap: 6px; color: #9a9aa3; }
-      .inline { display: flex; align-items: center; gap: 6px; margin-top: 7px; color: #b7b7bf; font-size: 12px; }
-      .inline .label { flex: 0 0 auto; }
-      .inline .unit { color: #9a9aa3; }
       input[type="number"] {
         box-sizing: border-box;
         width: 64px;
@@ -51,14 +48,28 @@
         font-size: 12px;
       }
       input[type="checkbox"] { width: 14px; height: 14px; margin: 0; accent-color: #d93a3f; flex: 0 0 auto; }
-      .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 8px; margin-top: 8px; }
+      .grid2 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px 8px; margin-top: 6px; }
+      .caps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px 8px; margin-top: 5px; }
+      .caps .field { margin: 0; }
+      .caps input[type="number"] { width: 48px; }
+      .caps .range { font-size: 11px; white-space: nowrap; gap: 5px; }
+      .caps .wide {
+        grid-column: 1 / -1;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-top: 1px;
+        color: #b7b7bf;
+        font-size: 12px;
+      }
+      .caps .wide .unit { color: #9a9aa3; font-size: 11px; white-space: nowrap; }
       .check { display: flex; align-items: center; gap: 7px; color: #d8d8de; font-size: 12px; }
       .check label { margin: 0; }
-      .divider { height: 1px; margin: 8px 0 0; background: #26262c; }
-      .actions { display: flex; gap: 8px; margin-top: 9px; }
+      .divider { height: 1px; margin: 5px 0 0; background: #26262c; }
+      .actions { display: flex; gap: 8px; margin-top: 7px; }
       button {
         flex: 1;
-        height: 30px;
+        height: 28px;
         border-radius: 9px;
         border: 1px solid #3a3a42;
         background: #232329;
@@ -73,13 +84,13 @@
         display: block;
         width: 100%;
         flex: none;
-        margin-top: 9px;
+        margin-top: 7px;
         border-color: #4a2730;
         background: #2a1a1e;
         color: #ffd9db;
       }
       button.danger:hover { background: #352025; border-color: #5f2f39; }
-      #status { margin-top: 5px; font-size: 11.5px; color: #8b8b93; min-height: 12px; word-break: break-word; }
+      #status { margin-top: 4px; font-size: 11.5px; color: #8b8b93; min-height: 12px; word-break: break-word; }
     </style>
   </head>
   <body>
@@ -119,32 +130,35 @@
       </div>
     </div>
 
-    <div class="inline">
-      <span class="label">Delete at most</span>
-      <input id="maxPerRun" type="number" min="0" step="10" aria-label="Most items per run, 0 for no limit" />
-      <span class="unit">per run</span>
-    </div>
-
-    <div class="inline">
-      <span class="label">Skip files larger than</span>
-      <input id="maxSizeMB" type="number" min="0" step="0.5" aria-label="Skip files larger than this many megabytes, 0 for no limit" />
-      <span class="unit">MB</span>
-    </div>
-
-    <div class="inline">
-      <span class="label">Scan at most</span>
-      <input id="maxScanPages" type="number" min="0" step="1" aria-label="Most pages to walk per list, 0 to walk them all" />
-      <span class="unit">pages</span>
-    </div>
-
-    <div class="field">
-      <span class="label">Ask to stop after</span>
-      <div class="range">
+    <div class="caps">
+      <div class="field">
+        <span class="label">Delete at most</span>
+        <div class="range">
+          <input id="maxPerRun" type="number" min="0" step="10" aria-label="Most items per run, 0 for no limit" />
+          <span>per run</span>
+        </div>
+      </div>
+      <div class="field">
+        <span class="label">Scan at most</span>
+        <div class="range">
+          <input id="maxScanPages" type="number" min="0" step="1" aria-label="Most pages to walk per list, 0 to walk them all" />
+          <span>pages</span>
+        </div>
+      </div>
+      <div class="field">
+        <span class="label">Skip files over</span>
+        <div class="range">
+          <input id="maxSizeMB" type="number" min="0" step="0.5" aria-label="Skip files larger than this many megabytes, 0 for no limit" />
+          <span>MB</span>
+        </div>
+      </div>
+      <div class="wide">
+        <span class="label">Ask to stop after</span>
         <input id="stopAfterNoCandidates" type="number" min="0" step="1" aria-label="Ask to stop after this many pages with no candidates, 0 to never ask" />
-        <span>pages with no candidates</span>
+        <span class="unit">pages with no candidates</span>
       </div>
     </div>
-    <p class="hint spaced">0 means no limit on the caps, and never asks to stop. A candidate is an asset your type filters and size cap would actually queue.</p>
+    <p class="hint spaced">0 means no limit, and never asks. A candidate is an asset your filters and size cap would queue.</p>
 
     <div class="grid2">
       <div class="check">
@@ -175,7 +189,7 @@
 
     <div class="divider"></div>
 
-    <div class="check" style="margin-top: 9px">
+    <div class="check" style="margin-top: 7px">
       <input id="downloadFirst" type="checkbox" />
       <label for="downloadFirst">Save a copy before deleting</label>
     </div>
@@ -185,7 +199,7 @@
       <input id="folder" type="text" spellcheck="false" placeholder="(no subfolder)" aria-label="Folder name inside the Downloads folder, leave empty to save straight into Downloads" />
     </div>
 
-    <div class="check" style="margin-top: 7px">
+    <div class="check" style="margin-top: 6px">
       <input id="savePrompts" type="checkbox" checked />
       <label for="savePrompts">Save the prompt as a .md beside each file</label>
     </div>
