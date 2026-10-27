@@ -2,13 +2,20 @@
 
 ## 1.1.1 — 2026-10-27
 
-### Fixed
+### Added
 
-- The settings popup no longer scrolls. Chrome caps a popup at 600px tall and the two new rows pushed the form to 714, so the four limits now share a compact row with the stop threshold on a line beneath it, the type filters sit in three columns, and the popup is 34px wider. It measures 578px, and every control is still on screen.
+- **Only younger than.** A text field that takes a compact age — `1d 6h`, `3m`, `2y 1m 3d`, any mix of years, months, weeks, days and hours — and spares everything older, so a run can clear the last day of experiments and leave the rest of the library alone. Empty means every age. The placeholder shows the format rather than a value, and an age the extension cannot read stops the run before anything is scanned.
 
 ### Changed
 
+- The settings popup is one form grid: a fixed label column with a control column beside it, so every input starts on the same vertical line and the two-value rows line up on a second one. It measures 340x537.
+- Every limit includes its edge. A 20-page cap reads page 20, a per-run cap of 3 queues the third item, a 3 MB cap keeps a file of exactly 3 MB, an age of 5d keeps a file created five days ago, and five pages with no candidates asks on the fifth page rather than the sixth.
 - The size limit reads *Skip files over N MB* instead of *Skip files larger than N MB*.
+
+### Fixed
+
+- The popup no longer scrolls. Chrome caps a popup at 600px tall and the added rows pushed the form past it; the limits now share one label column and the popup fits at 340x537 with every control on screen.
+- A run no longer fails on a tab that was open before the extension was reloaded. That tab keeps a content script whose extension context is gone, so it can never answer; the run leaves it untouched, opens its own library tab, and says to reload the extension when even that tab stays silent.
 
 ## 1.1 — 2026-10-27
 
