@@ -9,7 +9,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/type-chrome_extension-4285F4" alt="Type: Chrome extension">
   <img src="https://img.shields.io/badge/manifest-v3-1f6feb" alt="Manifest V3">
-  <img src="https://img.shields.io/badge/version-1.0-2fbf71" alt="Version 1.0">
+  <img src="https://img.shields.io/badge/version-1.1-2fbf71" alt="Version 1.1">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-97ca00" alt="License: MIT"></a>
 </p>
 
@@ -20,10 +20,10 @@ Chats and projects are two more removal types in the same popup, both off by def
 That order is the point. You leave with your work instead of a folder of untitled renders, and the library gets empty without you clicking a menu fifteen thousand times.
 
 <p align="center">
-  <img src="assets/popup.png" width="306"  alt="Grok Library Cleaner settings popup: wait and break pacing, per-run and size caps, type filters, and the save-copy options with a folder name and prompt sidecars">
+  <img src="assets/popup.png" width="306"  alt="Grok Library Cleaner settings popup: wait and break pacing, per-run, size and page caps, type filters, and the save-copy options with a folder name and prompt sidecars">
 </p>
 
-<p align="center"><sub>The settings popup at its real size, with saving turned on.</sub></p>
+<p align="center"><sub>The settings popup at its real size, with saving turned on and a page cap set.</sub></p>
 
 ## Install
 
@@ -46,6 +46,10 @@ git clone https://github.com/apoapostolov/grok-library-cleaner.git
 **Delete all from the popup.** The same button also lives in the settings popup, above Save, so you never have to be on the library page. It finds an open Grok tab and starts the run there; if none is open it opens the library first. The scan, the confirm and the progress bar all live in the tab, so the run keeps its toast and its Stop button where you can see them. If a run is already going in that tab, the popup says so instead of starting a second one.
 
 **Delete all.** Two clicks to arm, then a scan of the whole library and a confirm toast showing the queue size and per-class breakdown. Nothing is deleted until you press **Delete N**. During the run the toast carries a live progress bar with the count, failures, elapsed time and ETA, plus a **Stop** button. Every run can be stopped between items.
+
+**Page cap.** *Scan at most* sets how many pages of the list a run reads before it stops looking. A page holds 60 assets, so 20 pages is around 1,200 of them. Left at 0 the scan reads the whole list, as it always did, and the confirm toast says where a capped run stopped so a queue of 1,200 is never mistaken for the entire library.
+
+**Stop when the list is spent.** Count *Ask to stop after* pages that hold nothing left to delete, meaning nothing matching the type filters and nothing under the size cap, and the scan pauses to ask whether stopping makes sense. **Yes** ends the scan there and takes you to the confirmation with what it found; **Proceed** walks on to the page cap or the end of the list. The question comes once per run, and at 0 it never comes at all.
 
 **Separate selectors** for images (`image.jpg`), edited images (`edited-image.jpg`), videos (`generated_video.mp4`) and other files, with an optional per-run cap for a first pass on a large library.
 

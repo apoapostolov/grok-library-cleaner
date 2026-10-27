@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Grok Library Cleaner",
-  "version": "1.0",
+  "version": "1.1",
   "description": "Delete Grok library images in one click, or clear the whole library with a paced, confirmed sweep.",
   "permissions": [
     "storage",
