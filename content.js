@@ -41,7 +41,7 @@
     maxPerRun: 0,
     maxSizeMB: 0, // 0 = accept every size
     maxScanPages: 0, // 0 = walk every page the list has
-    stopAfterEmptyPages: 0, // 0 = never ask to stop early
+    stopAfterNoCandidates: 0, // 0 = never ask to stop early
     removeSessions: false, // chats and sessions, off by default
     removeProjects: false, // projects (workspaces), off by default
     downloadFirst: false, // opt in: save a copy before deleting
@@ -121,7 +121,7 @@
       maxPerRun: num(s.maxPerRun, 0, 0, 50000),
       maxSizeMB: num(s.maxSizeMB, 0, 0, 4096),
       maxScanPages: num(s.maxScanPages, 0, 0, 10000),
-      stopAfterEmptyPages: num(s.stopAfterEmptyPages, 0, 0, 10000),
+      stopAfterNoCandidates: num(s.stopAfterNoCandidates, 0, 0, 10000),
       removeSessions: s.removeSessions === true,
       removeProjects: s.removeProjects === true,
       downloadFirst: s.downloadFirst === true,
@@ -231,19 +231,19 @@
    * absorbed with a cooldown before the same page is retried.
    *
    * opts.maxPages: stop after this many pages, 0 walks the whole list.
-   * opts.stallPages: ask opts.onStall after this many consecutive pages that hold
-   * nothing to delete, 0 never asks. The answer 'stop' ends the scan there.
+   * opts.noCandidatePages: ask opts.onStall after this many consecutive pages where
+   * every asset is filtered out, 0 never asks. The answer 'stop' ends the scan there.
    * opts.countWanted: how many of one page's assets would really be queued.
    */
   async function listAllAssets(onProgress, stopWhen, opts = {}) {
     const out = [];
     const maxPages = Math.max(0, Number(opts.maxPages) || 0);
-    const stallPages = Math.max(0, Number(opts.stallPages) || 0);
+    const noCandidatePages = Math.max(0, Number(opts.noCandidatePages) || 0);
     const countWanted = typeof opts.countWanted === 'function' ? opts.countWanted : null;
     const onStall = typeof opts.onStall === 'function' ? opts.onStall : null;
     let token = null;
     let pages = 0;
-    let emptyStreak = 0;
+    let noCandidateStreak = 0;
     let partial = false;
     let stoppedBy = null; // 'pages' or 'stall'; null means the list simply ended
     let askedOnce = false; // one question per scan; Proceed means walk to the cap
@@ -261,7 +261,7 @@
 
       let res = null;
       for (let attempt = 0; attempt < 5; attempt += 1) {
-        if (stopRequested) return { assets: out, pages, partial: true, stoppedBy, emptyStreak };
+        if (stopRequested) return { assets: out, pages, partial: true, stoppedBy, noCandidateStreak };
         res = await fetch(API_LIST + '?' + params.toString(), { credentials: 'include' });
         if (res.status !== 429) break;
         if (onProgress) onProgress({ pages, count: out.length, throttled: true });
@@ -279,16 +279,17 @@
       token = json.nextPageToken || null;
       pages += 1;
 
-      // One quiet page proves nothing; a streak of them means the rest of the list
-      // holds nothing to delete, so the run asks before it keeps walking.
-      if (stallPages > 0) {
+      // A page with no candidates is not an empty page: it holds assets that the
+      // selected types, the size cap or an earlier delete pass have already ruled out.
+      // A streak of those means the rest of the list will not queue anything either.
+      if (noCandidatePages > 0) {
         const wanted = countWanted ? countWanted(page) : page.length;
-        emptyStreak = wanted === 0 ? emptyStreak + 1 : 0;
-        if (emptyStreak >= stallPages && token && !askedOnce) {
+        noCandidateStreak = wanted === 0 ? noCandidateStreak + 1 : 0;
+        if (noCandidateStreak >= noCandidatePages && token && !askedOnce) {
           askedOnce = true;
           if (onProgress) onProgress({ pages, count: out.length });
           const answer = onStall
-            ? await onStall({ pages, emptyStreak, count: out.length })
+            ? await onStall({ pages, noCandidates: noCandidateStreak, count: out.length })
             : 'continue';
           if (stopRequested) break;
           if (answer === 'stop') {
@@ -296,7 +297,7 @@
             partial = true;
             break;
           }
-          emptyStreak = 0;
+          noCandidateStreak = 0;
         }
       }
 
@@ -313,7 +314,7 @@
       partial = true;
       if (!stoppedBy && maxPages > 0 && pages >= maxPages) stoppedBy = 'pages';
     }
-    return { assets: out, pages, partial, stoppedBy, emptyStreak };
+    return { assets: out, pages, partial, stoppedBy, noCandidateStreak };
   }
 
   function selected(asset) {
@@ -951,11 +952,12 @@
   // ------------------------------------------------------------------ scan
 
   /**
-   * A scan that keeps landing on pages with nothing left to delete is probably past the
-   * live part of the library. This asks once, in the toast, and resolves with the answer:
-   * 'stop' deletes what was found so far, 'continue' walks on to the page cap or the end.
+   * A scan that keeps landing on pages with no candidates is probably past the live part of
+   * the library: what is left is media in unselected types, over the size cap, or already
+   * deleted. This asks once, in the toast, and resolves with the answer: 'stop' deletes what
+   * was found so far, 'continue' walks on to the page cap or the end of the list.
    */
-  function askStalled(info) {
+  function askNoCandidates(info) {
     return new Promise((resolve) => {
       let settled = false;
       const answer = (value) => {
@@ -969,15 +971,15 @@
           : 'the end of the library';
       showToast({
         tone: 'confirm',
-        title: 'Nothing new in ' + plural(info.emptyStreak, 'page', 'pages'),
+        title: plural(info.noCandidates, 'page', 'pages') + ' with no candidates',
         detail:
           'Scanned ' +
           plural(info.pages, 'page', 'pages') +
-          ' so far and found ' +
+          ' and ' +
           plural(info.count, 'asset', 'assets') +
-          '. The last ' +
-          plural(info.emptyStreak, 'page', 'pages') +
-          ' had nothing left to delete. Stop here and delete what was found, or keep going to ' +
+          ' so far. The last ' +
+          plural(info.noCandidates, 'page', 'pages') +
+          ' held nothing your type filters or size cap would queue. Stop here and delete what was found, or keep going to ' +
           ahead +
           '?',
         actions: [
@@ -1014,6 +1016,7 @@
     let partial = false;
     let stoppedBy = null;
     let scannedPages = 0;
+    let noCandidateStreak = 0;
     let chatsInProjects = 0;
     let tooBig = 0;
     const queue = [];
@@ -1097,9 +1100,9 @@
           limit > 0 ? (arr) => classify(arr).targets.length >= wanted : null,
           {
             maxPages: settings.maxScanPages,
-            stallPages: settings.stopAfterEmptyPages,
+            noCandidatePages: settings.stopAfterNoCandidates,
             countWanted: (page) => classify(page).targets.length,
-            onStall: askStalled,
+            onStall: askNoCandidates,
           }
         );
         if (stopRequested) return cancelAll();
@@ -1107,6 +1110,7 @@
         partial = res.partial;
         stoppedBy = res.stoppedBy || null;
         scannedPages = res.pages || 0;
+        noCandidateStreak = res.noCandidateStreak || 0;
         const built = classify(assets);
         tooBig = built.tooBig;
         for (const a of built.targets) {
@@ -1174,7 +1178,9 @@
           : '') +
         ' · scanned ' +
         scannedParts.join(' · ') +
-        (stoppedBy === 'stall' ? ' · stopped early: nothing new' : '') +
+        (stoppedBy === 'stall'
+          ? ' · stopped early: ' + plural(noCandidateStreak, 'page', 'pages') + ' with no candidates'
+          : '') +
         (stoppedBy === 'pages' ? ' · stopped at ' + plural(scannedPages, 'page', 'pages') : '') +
         (partial && !stoppedBy ? ' (partial)' : ''),
       actions: [

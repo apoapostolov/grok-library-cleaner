@@ -49,7 +49,7 @@ git clone https://github.com/apoapostolov/grok-library-cleaner.git
 
 **Page cap.** *Scan at most* sets how many pages of the list a run reads before it stops looking. A page holds 60 assets, so 20 pages is around 1,200 of them. Left at 0 the scan reads the whole list, as it always did, and the confirm toast says where a capped run stopped so a queue of 1,200 is never mistaken for the entire library.
 
-**Stop when the list is spent.** Count *Ask to stop after* pages that hold nothing left to delete, meaning nothing matching the type filters and nothing under the size cap, and the scan pauses to ask whether stopping makes sense. **Yes** ends the scan there and takes you to the confirmation with what it found; **Proceed** walks on to the page cap or the end of the list. The question comes once per run, and at 0 it never comes at all.
+**Stop when the rest is spent.** *Ask to stop after* counts pages with no candidates: no asset your type filters and size cap would queue. A page of videos with videos switched off counts, and so does a page of renders over the size limit, even though both pages are full of files. After that many in a row the scan pauses and asks whether stopping makes sense. **Yes** ends the scan there and takes you to the confirmation with what it found; **Proceed** walks on to the page cap or the end of the list. The question comes once per run, and at 0 it never comes at all.
 
 **Separate selectors** for images (`image.jpg`), edited images (`edited-image.jpg`), videos (`generated_video.mp4`) and other files, with an optional per-run cap for a first pass on a large library.
 

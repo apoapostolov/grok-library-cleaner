@@ -137,12 +137,14 @@
       <span class="unit">pages</span>
     </div>
 
-    <div class="inline">
+    <div class="field">
       <span class="label">Ask to stop after</span>
-      <input id="stopAfterEmptyPages" type="number" min="0" step="1" aria-label="Ask to stop after this many pages with nothing to delete, 0 to never ask" />
-      <span class="unit">empty pages</span>
+      <div class="range">
+        <input id="stopAfterNoCandidates" type="number" min="0" step="1" aria-label="Ask to stop after this many pages with no candidates, 0 to never ask" />
+        <span>pages with no candidates</span>
+      </div>
     </div>
-    <p class="hint spaced">0 means no limit on the caps, and never asks to stop.</p>
+    <p class="hint spaced">0 means no limit on the caps, and never asks to stop. A candidate is an asset your type filters and size cap would actually queue.</p>
 
     <div class="grid2">
       <div class="check">
