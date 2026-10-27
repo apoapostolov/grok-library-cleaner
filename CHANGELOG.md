@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.1 — 2026-10-27
+
+### Fixed
+
+- The settings popup no longer scrolls. Chrome caps a popup at 600px tall and the two new rows pushed the form to 714, so the four limits now share a compact row with the stop threshold on a line beneath it, the type filters sit in three columns, and the popup is 34px wider. It measures 578px, and every control is still on screen.
+
+### Changed
+
+- The size limit reads *Skip files over N MB* instead of *Skip files larger than N MB*.
+
 ## 1.1 — 2026-10-27
 
 Two scan controls, so a big library can be worked in passes instead of one long walk.

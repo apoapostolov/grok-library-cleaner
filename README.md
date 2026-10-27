@@ -9,7 +9,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/type-chrome_extension-4285F4" alt="Type: Chrome extension">
   <img src="https://img.shields.io/badge/manifest-v3-1f6feb" alt="Manifest V3">
-  <img src="https://img.shields.io/badge/version-1.1-2fbf71" alt="Version 1.1">
+  <img src="https://img.shields.io/badge/version-1.1.1-2fbf71" alt="Version 1.1.1">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-97ca00" alt="License: MIT"></a>
 </p>
 
@@ -35,6 +35,8 @@ git clone https://github.com/apoapostolov/grok-library-cleaner.git
 2. Choose **Load unpacked** and select the cloned folder.
 3. Reload any open `grok.com/library` tab.
 
+Chrome loads unpacked extensions from a folder, never from an archive, so the same build is also packaged in [`dist/`](dist): download the zip, unzip it anywhere, and point **Load unpacked** at the unzipped folder. It holds the files Chrome needs, without the readme, the changelog or the icon sources.
+
 ## What you get
 
 **Chats and projects.** Two removal types beyond the library, off by default. Chats are the sessions in the sidebar. Projects are what Grok stores as workspaces, and they are deleted through the same confirmed sweep. Neither has a size or a download step, because neither is a file. A chat that belongs to a project is left alone when you remove chats, so clearing sessions cannot gut a project. With a per-run cap set, the queue fills in the order the popup shows: chats, then projects, then library files.
@@ -53,7 +55,7 @@ git clone https://github.com/apoapostolov/grok-library-cleaner.git
 
 **Separate selectors** for images (`image.jpg`), edited images (`edited-image.jpg`), videos (`generated_video.mp4`) and other files, with an optional per-run cap for a first pass on a large library.
 
-**Size guard.** "Skip files larger than N MB" keeps big renders out of a bulk purge. `sizeBytes` ships with every list row, so the guard adds no requests and no scanning time. It applies while the queue is built, before anything is deleted, and the confirm toast reports how many matches were spared. On a sample of 600 recent assets, a 1 MB cap spared 1.4% of plain images and 100% of videos. The per-tile glyph still deletes whatever you click, cap or no cap, because that click is explicit.
+**Size guard.** *Skip files over N MB* keeps big renders out of a bulk purge. `sizeBytes` ships with every list row, so the guard adds no requests and no scanning time. It applies while the queue is built, before anything is deleted, and the confirm toast reports how many matches were spared. On a sample of 600 recent assets, a 1 MB cap spared 1.4% of plain images and 100% of videos. The per-tile glyph still deletes whatever you click, cap or no cap, because that click is explicit.
 
 ## Keep a copy before it goes
 
