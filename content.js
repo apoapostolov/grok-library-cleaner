@@ -287,6 +287,7 @@
       if (noCandidatePages > 0) {
         const wanted = countWanted ? countWanted(page) : page.length;
         noCandidateStreak = wanted === 0 ? noCandidateStreak + 1 : 0;
+        // On the Nth page, not the N+1th: five pages means five.
         if (noCandidateStreak >= noCandidatePages && token && !askedOnce) {
           askedOnce = true;
           if (onProgress) onProgress({ pages, count: out.length });
@@ -382,12 +383,14 @@
       // createTime ships with every list row too, so the age filter is just a comparison
       if (cutoff) {
         const made = Date.parse(a.createTime);
+        // Strictly older is spared, so a file created exactly at the cutoff is a candidate.
         if (!Number.isFinite(made) || made < cutoff) {
           tooOld += 1;
           continue;
         }
       }
-      // sizeBytes ships with every list row, so the cap costs no extra request
+      // sizeBytes ships with every list row, so the cap costs no extra request.
+      // Strictly larger is skipped, so a file of exactly the cap is a candidate.
       if (cap && (Number(a.sizeBytes) || 0) > cap) {
         tooBig += 1;
         continue;
@@ -1078,6 +1081,7 @@
     let tooBig = 0;
     let tooOld = 0;
     const queue = [];
+    // Fills to exactly `limit` items, then stops adding.
     const room = () => (limit > 0 ? Math.max(0, limit - queue.length) : Infinity);
 
     try {

@@ -59,6 +59,8 @@ Chrome loads unpacked extensions from a folder, never from an archive, so the sa
 
 **Age filter.** *Only delete files younger than* takes a compact age such as `1d 6h`, `3m` or `2y 1m 3d`, any mix of years, months, weeks, days and hours. Everything older is spared, so a run can clear the last day of experiments and leave the rest of the library alone. The field starts empty and its dim placeholder shows the format rather than a value. An age the extension cannot read stops the run before anything is scanned, and the confirmation names the filter and how many files it spared.
 
+**Every limit is inclusive.** *Scan at most* 20 reads page 20, *Delete at most* 3 queues the third item, a 3 MB cap keeps a file of exactly 3 MB, and *younger than 5d* keeps a file created exactly five days ago. Five pages with no candidates asks on the fifth, not the sixth.
+
 ## Keep a copy before it goes
 
 Saving is off until you turn it on, and the folder field starts empty. Name a folder and copies land sorted by creation day, for example `Downloads/GrokLibrary/2026-10-21/`. Leave the field empty and the day folders sit straight in Downloads, at `Downloads/2026-10-21/`.
