@@ -40,6 +40,8 @@
     includeOther: false,
     maxPerRun: 0,
     maxSizeMB: 0, // 0 = accept every size
+    maxScanPages: 0, // 0 = walk every page the list has
+    stopAfterEmptyPages: 0, // 0 = never ask to stop early
     removeSessions: false, // chats and sessions, off by default
     removeProjects: false, // projects (workspaces), off by default
     downloadFirst: false, // opt in: save a copy before deleting
@@ -118,6 +120,8 @@
       includeOther: s.includeOther === true,
       maxPerRun: num(s.maxPerRun, 0, 0, 50000),
       maxSizeMB: num(s.maxSizeMB, 0, 0, 4096),
+      maxScanPages: num(s.maxScanPages, 0, 0, 10000),
+      stopAfterEmptyPages: num(s.stopAfterEmptyPages, 0, 0, 10000),
       removeSessions: s.removeSessions === true,
       removeProjects: s.removeProjects === true,
       downloadFirst: s.downloadFirst === true,
@@ -225,13 +229,25 @@
    * Enumerates the library newest-first. pageSize is capped server side at 60, so a 5000
    * asset library costs roughly 85 sequential pages; each page rests, and every 429 is
    * absorbed with a cooldown before the same page is retried.
+   *
+   * opts.maxPages: stop after this many pages, 0 walks the whole list.
+   * opts.stallPages: ask opts.onStall after this many consecutive pages that hold
+   * nothing to delete, 0 never asks. The answer 'stop' ends the scan there.
+   * opts.countWanted: how many of one page's assets would really be queued.
    */
-  async function listAllAssets(onProgress, stopWhen) {
+  async function listAllAssets(onProgress, stopWhen, opts = {}) {
     const out = [];
+    const maxPages = Math.max(0, Number(opts.maxPages) || 0);
+    const stallPages = Math.max(0, Number(opts.stallPages) || 0);
+    const countWanted = typeof opts.countWanted === 'function' ? opts.countWanted : null;
+    const onStall = typeof opts.onStall === 'function' ? opts.onStall : null;
     let token = null;
     let pages = 0;
+    let emptyStreak = 0;
     let partial = false;
-    while (pages < 400) {
+    let stoppedBy = null; // 'pages' or 'stall'; null means the list simply ended
+    let askedOnce = false; // one question per scan; Proceed means walk to the cap
+    while ((maxPages === 0 || pages < maxPages) && pages < 400) {
       if (stopRequested) break;
       const params = new URLSearchParams({
         pageSize: PAGE_SIZE,
@@ -245,7 +261,7 @@
 
       let res = null;
       for (let attempt = 0; attempt < 5; attempt += 1) {
-        if (stopRequested) return out;
+        if (stopRequested) return { assets: out, pages, partial: true, stoppedBy, emptyStreak };
         res = await fetch(API_LIST + '?' + params.toString(), { credentials: 'include' });
         if (res.status !== 429) break;
         if (onProgress) onProgress({ pages, count: out.length, throttled: true });
@@ -254,19 +270,50 @@
       if (!res || !res.ok) throw new Error('asset list failed: HTTP ' + (res ? res.status : 'no response'));
 
       const json = await res.json();
-      for (const a of json.assets || []) if (a && a.assetId) out.push(a);
+      const page = [];
+      for (const a of json.assets || []) {
+        if (!a || !a.assetId) continue;
+        out.push(a);
+        page.push(a);
+      }
       token = json.nextPageToken || null;
       pages += 1;
+
+      // One quiet page proves nothing; a streak of them means the rest of the list
+      // holds nothing to delete, so the run asks before it keeps walking.
+      if (stallPages > 0) {
+        const wanted = countWanted ? countWanted(page) : page.length;
+        emptyStreak = wanted === 0 ? emptyStreak + 1 : 0;
+        if (emptyStreak >= stallPages && token && !askedOnce) {
+          askedOnce = true;
+          if (onProgress) onProgress({ pages, count: out.length });
+          const answer = onStall
+            ? await onStall({ pages, emptyStreak, count: out.length })
+            : 'continue';
+          if (stopRequested) break;
+          if (answer === 'stop') {
+            stoppedBy = 'stall';
+            partial = true;
+            break;
+          }
+          emptyStreak = 0;
+        }
+      }
+
       if (onProgress) onProgress({ pages, count: out.length });
       if (stopWhen && stopWhen(out)) {
         partial = true;
         break;
       }
-      if (token) await sleep(rand(1200, 2000));
+      if (!token) break;
+      await sleep(rand(1200, 2000));
     }
-    // Exhausted the 400 page cap while the server still had more to give.
-    if (token && !partial) partial = true;
-    return { assets: out, pages, partial };
+    // More pages exist, so the walk ended early: page cap, stall, or the 400 hard stop.
+    if (token) {
+      partial = true;
+      if (!stoppedBy && maxPages > 0 && pages >= maxPages) stoppedBy = 'pages';
+    }
+    return { assets: out, pages, partial, stoppedBy, emptyStreak };
   }
 
   function selected(asset) {
@@ -357,6 +404,7 @@
   };
 
   let toastTimer = null;
+  let leaveTimer = null;
 
   function toastNode() {
     if (toastEl && document.body.contains(toastEl)) return toastEl;
@@ -390,7 +438,9 @@
     if (!toastEl) return;
     const el = toastEl;
     el.dataset.leaving = '1';
-    setTimeout(() => {
+    if (leaveTimer) clearTimeout(leaveTimer);
+    leaveTimer = setTimeout(() => {
+      leaveTimer = null;
       el.remove();
       if (toastEl === el) toastEl = null;
     }, 170);
@@ -403,6 +453,11 @@
    */
   function showToast(opts) {
     const el = toastNode();
+    // Whatever was fading out is this toast now; dropping it later would blank the panel.
+    if (leaveTimer) {
+      clearTimeout(leaveTimer);
+      leaveTimer = null;
+    }
     const tone = TONES[opts.tone || opts.state || 'busy'] || 'busy';
     el.dataset.tone = tone;
     el.dataset.leaving = '0';
@@ -800,12 +855,13 @@
    * Chats paginate 60 at a time. A chat that sits inside a project is left
    * alone here: it belongs to that project, so removing chats never guts one.
    */
-  async function listConversations(onProgress, stopWhen) {
+  async function listConversations(onProgress, stopWhen, opts = {}) {
     const out = [];
+    const maxPages = Math.max(1, Number(opts.maxPages) || 500);
     let token = null;
     let pages = 0;
     let partial = false;
-    while (pages < 500) {
+    while (pages < Math.min(500, maxPages)) {
       if (stopRequested) break;
       const params = new URLSearchParams({ pageSize: '60' });
       if (token) params.set('pageToken', token);
@@ -830,12 +886,13 @@
     return { items: out, partial };
   }
 
-  async function listWorkspaces(onProgress, stopWhen) {
+  async function listWorkspaces(onProgress, stopWhen, opts = {}) {
     const out = [];
+    const maxPages = Math.max(1, Number(opts.maxPages) || 40);
     let token = null;
     let pages = 0;
     let partial = false;
-    while (pages < 40) {
+    while (pages < Math.min(40, maxPages)) {
       if (stopRequested) break;
       const params = new URLSearchParams({
         pageSize: '50',
@@ -893,6 +950,44 @@
 
   // ------------------------------------------------------------------ scan
 
+  /**
+   * A scan that keeps landing on pages with nothing left to delete is probably past the
+   * live part of the library. This asks once, in the toast, and resolves with the answer:
+   * 'stop' deletes what was found so far, 'continue' walks on to the page cap or the end.
+   */
+  function askStalled(info) {
+    return new Promise((resolve) => {
+      let settled = false;
+      const answer = (value) => {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+      };
+      const ahead =
+        settings.maxScanPages > 0
+          ? 'page ' + fmtInt(settings.maxScanPages) + ' of this run'
+          : 'the end of the library';
+      showToast({
+        tone: 'confirm',
+        title: 'Nothing new in ' + plural(info.emptyStreak, 'page', 'pages'),
+        detail:
+          'Scanned ' +
+          plural(info.pages, 'page', 'pages') +
+          ' so far and found ' +
+          plural(info.count, 'asset', 'assets') +
+          '. The last ' +
+          plural(info.emptyStreak, 'page', 'pages') +
+          ' had nothing left to delete. Stop here and delete what was found, or keep going to ' +
+          ahead +
+          '?',
+        actions: [
+          { label: 'Yes, stop', kind: 'danger', onClick: () => answer('stop') },
+          { label: 'Proceed', onClick: () => answer('continue') },
+        ],
+      });
+    });
+  }
+
   async function startScan() {
     if (phase !== 'idle') return;
     if (!anyTypeSelected()) {
@@ -917,6 +1012,8 @@
     let projects = [];
     let assets = [];
     let partial = false;
+    let stoppedBy = null;
+    let scannedPages = 0;
     let chatsInProjects = 0;
     let tooBig = 0;
     const queue = [];
@@ -938,7 +1035,8 @@
           limit > 0
             ? (cs) =>
                 cs.filter((c) => !(Array.isArray(c.workspaces) && c.workspaces.length)).length >= wantedChats
-            : null
+            : null,
+          { maxPages: settings.maxScanPages }
         );
         if (stopRequested) return cancelAll();
         convs = scannedChats.items;
@@ -967,7 +1065,8 @@
             actions: [stopAction],
           });
           },
-          limit > 0 ? (ws) => ws.length >= wantedProjects : null
+          limit > 0 ? (ws) => ws.length >= wantedProjects : null,
+          { maxPages: settings.maxScanPages }
         );
         if (stopRequested) return cancelAll();
         projects = scannedProjects.items;
@@ -989,16 +1088,25 @@
                 plural(p.count, 'asset', 'assets') +
                 ' · ' +
                 plural(p.pages, 'page', 'pages') +
+                (settings.maxScanPages > 0 ? ' of ' + fmtInt(settings.maxScanPages) : '') +
                 (p.throttled ? ' · waiting ~20-30s' : ''),
               progress: { indeterminate: true },
               actions: [stopAction],
             });
           },
-          limit > 0 ? (arr) => classify(arr).targets.length >= wanted : null
+          limit > 0 ? (arr) => classify(arr).targets.length >= wanted : null,
+          {
+            maxPages: settings.maxScanPages,
+            stallPages: settings.stopAfterEmptyPages,
+            countWanted: (page) => classify(page).targets.length,
+            onStall: askStalled,
+          }
         );
         if (stopRequested) return cancelAll();
         assets = res.assets;
         partial = res.partial;
+        stoppedBy = res.stoppedBy || null;
+        scannedPages = res.pages || 0;
         const built = classify(assets);
         tooBig = built.tooBig;
         for (const a of built.targets) {
@@ -1066,7 +1174,9 @@
           : '') +
         ' · scanned ' +
         scannedParts.join(' · ') +
-        (partial ? ' (partial)' : ''),
+        (stoppedBy === 'stall' ? ' · stopped early: nothing new' : '') +
+        (stoppedBy === 'pages' ? ' · stopped at ' + plural(scannedPages, 'page', 'pages') : '') +
+        (partial && !stoppedBy ? ' (partial)' : ''),
       actions: [
         {
           label: 'Delete ' + fmtInt(queue.length),
@@ -1224,12 +1334,13 @@
   window.__grokLibraryCleanerApi = {
     list: listAllAssets,
     preview: async () => {
-      const res = await listAllAssets();
+      const res = await listAllAssets(null, null, { maxPages: settings.maxScanPages });
       const { counts, chosen, targets, tooBig } = classify(res.assets);
       return {
         scanned: res.assets.length,
         pages: res.pages,
         partial: res.partial,
+        stoppedBy: res.stoppedBy || null,
         counts,
         chosen,
         queue: targets.length,

@@ -12,6 +12,8 @@ const DEFAULTS = {
   includeOther: false,
   maxPerRun: 0,
   maxSizeMB: 0,
+  maxScanPages: 0,
+  stopAfterEmptyPages: 0,
   removeSessions: false,
   removeProjects: false,
   downloadFirst: false,
@@ -28,6 +30,8 @@ const NUMBER_FIELDS = [
   ['longPauseMax', 'pauseMax'],
   ['maxPerRun', 'maxPerRun'],
   ['maxSizeMB', 'maxSizeMB'],
+  ['maxScanPages', 'maxScanPages'],
+  ['stopAfterEmptyPages', 'stopAfterEmptyPages'],
 ];
 
 const CHECKBOXES = [
@@ -89,6 +93,8 @@ function read() {
     longPauseMax: Math.min(600000, Math.max(1000, v('pauseMax') || DEFAULTS.longPauseMax)),
     maxPerRun: Math.min(50000, Math.max(0, v('maxPerRun') || 0)),
     maxSizeMB: Math.min(4096, Math.max(0, Math.round((v('maxSizeMB') || 0) * 10) / 10)),
+    maxScanPages: Math.min(10000, Math.max(0, Math.round(v('maxScanPages') || 0))),
+    stopAfterEmptyPages: Math.min(10000, Math.max(0, Math.round(v('stopAfterEmptyPages') || 0))),
   };
   for (const key of CHECKBOXES) out[key] = document.getElementById(key).checked;
   out.folder = cleanFolder(document.getElementById('folder').value);

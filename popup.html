@@ -130,7 +130,19 @@
       <input id="maxSizeMB" type="number" min="0" step="0.5" aria-label="Skip files larger than this many megabytes, 0 for no limit" />
       <span class="unit">MB</span>
     </div>
-    <p class="hint spaced">0 means no limit on either cap.</p>
+
+    <div class="inline">
+      <span class="label">Scan at most</span>
+      <input id="maxScanPages" type="number" min="0" step="1" aria-label="Most pages to walk per list, 0 to walk them all" />
+      <span class="unit">pages</span>
+    </div>
+
+    <div class="inline">
+      <span class="label">Ask to stop after</span>
+      <input id="stopAfterEmptyPages" type="number" min="0" step="1" aria-label="Ask to stop after this many pages with nothing to delete, 0 to never ask" />
+      <span class="unit">empty pages</span>
+    </div>
+    <p class="hint spaced">0 means no limit on the caps, and never asks to stop.</p>
 
     <div class="grid2">
       <div class="check">
