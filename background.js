@@ -63,22 +63,31 @@ function waitForContentScript(tabId, tries = 24, gap = 500) {
   });
 }
 
+/**
+ * A tab that was already open when the extension was reloaded still holds the previous
+ * copy of the content script, and that copy can never answer again: its extension context
+ * is gone. Reloading the user's tab would throw away whatever they had in it, so an
+ * unresponsive tab is left alone and the run opens its own library tab instead.
+ */
 async function startRunInGrokTab() {
-  let tab = await findGrokTab();
-  let opened = false;
-  if (!tab) {
-    tab = await chrome.tabs.create({ url: GROK_ORIGIN + 'library', active: true });
-    opened = true;
+  const open = await findGrokTab();
+  if (open && (await waitForContentScript(open.id, 12, 500))) {
+    return launchRun(open.id);
   }
-  const ready = await waitForContentScript(tab.id);
-  if (!ready) {
-    return { ok: false, error: 'The Grok tab did not answer. Reload it and try again.' };
+
+  const tab = await chrome.tabs.create({ url: GROK_ORIGIN + 'library', active: true });
+  if (!(await waitForContentScript(tab.id, 40, 500))) {
+    return {
+      ok: false,
+      error: 'No Grok tab answered. Reload the extension in chrome://extensions, then try again.',
+    };
   }
-  if (opened) {
-    await chrome.tabs.update(tab.id, { active: true });
-  }
+  return launchRun(tab.id);
+}
+
+function launchRun(tabId) {
   return new Promise((resolve) => {
-    chrome.tabs.sendMessage(tab.id, { type: 'glc-start' }, (res) => {
+    chrome.tabs.sendMessage(tabId, { type: 'glc-start' }, (res) => {
       if (chrome.runtime.lastError) {
         resolve({ ok: false, error: chrome.runtime.lastError.message });
         return;

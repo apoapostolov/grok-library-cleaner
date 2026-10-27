@@ -151,7 +151,13 @@
     chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       if (!msg || !msg.type) return;
       if (msg.type === 'glc-ping') {
-        reply({ ok: true, phase });
+        let version = '';
+        try {
+          version = chrome.runtime.getManifest().version;
+        } catch (e) {
+          /* a ping is still useful without the version */
+        }
+        reply({ ok: true, phase, version });
         return;
       }
       if (msg.type === 'glc-start') {
