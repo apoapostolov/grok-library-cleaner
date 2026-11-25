@@ -1,9 +1,33 @@
 /* Grok Library Cleaner - injected UI. Scoped .glc-* classes only. */
 
-.glc-glyph {
+.glc-tools {
   position: absolute;
   top: 6px;
-  inset-inline-end: 6px;
+  inset-inline-start: 6px;
+  z-index: 31;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.glc-picked {
+  outline: 2px solid #d93a3f;
+  outline-offset: -2px;
+}
+
+.glc-check {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+  border-radius: 4px;
+  accent-color: #d93a3f;
+  cursor: pointer;
+  box-shadow: 0 0 0 2px rgba(12, 12, 14, 0.55);
+}
+
+.glc-glyph {
+  position: relative;
   z-index: 30;
   display: inline-flex;
   align-items: center;
@@ -24,11 +48,22 @@
   line-height: 0;
 }
 
+.glc-delete {
+  position: absolute;
+  top: 6px;
+  inset-inline-end: 6px;
+  z-index: 31;
+}
+
 .glc-glyph:hover {
   opacity: 1;
+  background: rgba(255, 255, 255, 0.16);
+  transform: scale(1.06);
+}
+
+.glc-delete:hover {
   background: #d93a3f;
   border-color: #d93a3f;
-  transform: scale(1.06);
 }
 
 .glc-glyph[data-busy="1"] {
@@ -65,6 +100,8 @@
   gap: 6px;
   height: 32px;
   padding: 0 12px;
+  margin-left: 8px !important;
+  margin-right: 8px !important;
   border-radius: 999px;
   border: 1px solid rgba(217, 58, 63, 0.55);
   background: rgba(217, 58, 63, 0.12);
@@ -93,6 +130,17 @@
   border-color: #d93a3f;
   color: #fff;
   animation: none;
+}
+
+.glc-header-btn.glc-selected-btn {
+  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.06);
+  color: #f2f2f4;
+}
+
+.glc-header-btn.glc-selected-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
 }
 
 @keyframes glc-pulse {

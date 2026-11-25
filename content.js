@@ -53,6 +53,13 @@
   let settings = { ...DEFAULTS };
   let phase = 'idle'; // idle | scan | confirm | run
   let stopRequested = false;
+  const selectedIds = new Set();
+  const hiddenIds = new Set();
+  const pendingDelete = [];
+  const queuedDeleteIds = new Set();
+  let selectionWorker = false;
+  let selectionStop = false;
+  const selectionStats = { done: 0, failed: 0, total: 0, startedAt: 0, lastError: '' };
   let armTimer = null;
   let toastEl = null;
 
@@ -96,6 +103,12 @@
     const sec = Math.round(s % 60);
     return m ? m + 'm ' + sec + 's' : sec + 's';
   };
+
+  const EYE_SVG =
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" ' +
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/>' +
+    '<circle cx="12" cy="12" r="3"/></svg>';
 
   const TRASH_SVG =
     '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" ' +
@@ -200,10 +213,10 @@
     return { status: res.status, ok: res.ok, retryAfter: res.headers.get('retry-after'), body };
   }
 
-  async function deleteWithRetry(kind, id) {
+  async function deleteWithRetry(kind, id, opts = {}) {
     let attempt = 0;
     while (attempt < 4) {
-      if (stopRequested) return { stopped: true };
+      if (!opts.ignoreStop && stopRequested) return { stopped: true };
       let r;
       try {
         r = await deleteOnce(kind, id);
@@ -774,15 +787,105 @@
 
   // ----------------------------------------------------------- tile glyph
 
+  function selectionLabel() {
+    const n = selectedIds.size;
+    return n ? 'Delete selected (' + fmtInt(n) + ')' : 'Delete selected';
+  }
+
+  function selectedButton() {
+    return document.querySelector('.glc-selected-btn');
+  }
+
+  function refreshSelectedButton() {
+    const btn = selectedButton();
+    if (!btn) return;
+    const waiting = pendingDelete.length + (selectionWorker ? 1 : 0);
+    btn.textContent = selectionLabel();
+    btn.title = waiting
+      ? 'Deleting ' + fmtInt(waiting) + ' in the background. Checked tiles are sent on the next click.'
+      : 'Hide the checked tiles and delete them in the background';
+  }
+
+  function setSelected(id, on, tile, box) {
+    if (on) selectedIds.add(id);
+    else selectedIds.delete(id);
+    if (box) box.checked = on;
+    if (tile) tile.classList.toggle('glc-picked', on);
+    refreshSelectedButton();
+  }
+
+  function addCheck(tileButton) {
+    const id = tileButton.getAttribute('data-library-item-id');
+    if (!id) return;
+    const tile = tileButton.parentElement;
+    if (!tile || tile.querySelector(':scope > .glc-tools')) return;
+
+    const tools = document.createElement('div');
+    tools.className = 'glc-tools';
+
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.className = 'glc-check';
+    box.title = 'Select for deletion';
+    box.setAttribute('aria-label', 'Select this item');
+    box.checked = selectedIds.has(id);
+    if (box.checked) tile.classList.add('glc-picked');
+
+    const keepTile = (event) => event.stopPropagation();
+    box.addEventListener('pointerdown', keepTile, true);
+    box.addEventListener('mousedown', keepTile, true);
+    box.addEventListener('click', keepTile, true);
+    box.addEventListener('change', () => setSelected(id, box.checked, tile, box));
+
+    const eye = document.createElement('button');
+    eye.type = 'button';
+    eye.className = 'glc-glyph glc-view';
+    eye.title = 'View';
+    eye.setAttribute('aria-label', 'View this item');
+    eye.innerHTML = EYE_SVG;
+    eye.addEventListener(
+      'click',
+      (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        tileButton.dataset.glcView = '1';
+        tileButton.click();
+      },
+      true
+    );
+
+    if (tileButton.dataset.glcSelect !== '1') {
+      tileButton.dataset.glcSelect = '1';
+      tileButton.addEventListener(
+        'click',
+        (event) => {
+          if (tileButton.dataset.glcView === '1') {
+            delete tileButton.dataset.glcView;
+            return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          setSelected(id, !selectedIds.has(id), tile, box);
+        },
+        true
+      );
+    }
+
+    tools.appendChild(box);
+    tools.appendChild(eye);
+    tile.appendChild(tools);
+    addGlyph(tileButton);
+  }
+
   function addGlyph(tileButton) {
     const id = tileButton.getAttribute('data-library-item-id');
     if (!id) return;
     const tile = tileButton.parentElement;
-    if (!tile || tile.querySelector(':scope > .glc-glyph')) return;
+    if (!tile || tile.querySelector(':scope > .glc-delete')) return;
 
     const glyph = document.createElement('button');
     glyph.type = 'button';
-    glyph.className = 'glc-glyph';
+    glyph.className = 'glc-glyph glc-delete';
     glyph.title = 'Delete (immediately)';
     glyph.setAttribute('aria-label', 'Delete this item');
     glyph.innerHTML = TRASH_SVG; // static constant
@@ -809,6 +912,8 @@
         const res = await deleteWithRetry('asset', id);
         if (res.ok) {
           const name = tileButton.getAttribute('aria-label') || 'item';
+          selectedIds.delete(id);
+          refreshSelectedButton();
           hideTile(tile);
           flashSuccess(
             'Deleted ' + name,
@@ -837,8 +942,9 @@
   }
 
   function removeTileById(id) {
-    const btn = document.querySelector(TILE_BTN + '[data-library-item-id="' + id + '"]');
-    if (btn && btn.parentElement) hideTile(btn.parentElement);
+    document.querySelectorAll(TILE_BTN + '[data-library-item-id="' + id + '"]').forEach((btn) => {
+      if (btn.parentElement) hideTile(btn.parentElement);
+    });
   }
 
   // --------------------------------------------------------- header button
@@ -847,7 +953,15 @@
     return document.querySelector('.glc-header-btn');
   }
 
+  function padHeaderButtons() {
+    document.querySelectorAll('.glc-header-btn').forEach((btn) => {
+      btn.style.setProperty('margin-left', '8px', 'important');
+      btn.style.setProperty('margin-right', '8px', 'important');
+    });
+  }
+
   function ensureHeaderButton() {
+    padHeaderButtons();
     if (headerButton()) return;
     const upload = Array.from(document.querySelectorAll('button')).find(
       (b) => (b.textContent || '').trim() === 'Upload files'
@@ -862,7 +976,139 @@
     btn.textContent = 'Delete all';
     btn.title = 'Scan the library, then delete what you confirm';
     btn.addEventListener('click', onHeaderClick, true);
+
+    const selected = document.createElement('button');
+    selected.type = 'button';
+    selected.className = 'glc-header-btn glc-selected-btn';
+    selected.textContent = selectionLabel();
+    selected.title = 'Hide the checked tiles and delete them in the background';
+    selected.addEventListener('click', onDeleteSelected, true);
+    group.insertBefore(selected, group.firstChild);
     group.insertBefore(btn, group.firstChild);
+  }
+
+  function onDeleteSelected(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!selectedIds.size) {
+      flashError('Nothing selected', 'Check the boxes on the tiles you want to delete.');
+      return;
+    }
+    let added = 0;
+    for (const id of selectedIds) {
+      hiddenIds.add(id);
+      removeTileById(id);
+      if (!queuedDeleteIds.has(id)) {
+        queuedDeleteIds.add(id);
+        pendingDelete.push(id);
+        added += 1;
+      }
+    }
+    selectedIds.clear();
+    if (added) {
+      if (!selectionStats.total) selectionStats.startedAt = Date.now();
+      selectionStats.total += added;
+    }
+    selectionStop = false;
+    refreshSelectedButton();
+    renderSelectionToast();
+    pumpSelectionDeletes();
+  }
+
+  function renderSelectionToast() {
+    if (phase !== 'idle') return;
+    const finished = selectionStats.done + selectionStats.failed;
+    const elapsed = selectionStats.startedAt ? (Date.now() - selectionStats.startedAt) / 1000 : 0;
+    const remaining = Math.max(0, selectionStats.total - finished);
+    const perItem = finished > 0 ? elapsed / finished : 0;
+    showToast({
+      tone: 'busy',
+      title: selectionStop
+        ? 'Stopping…'
+        : 'Deleting ' + fmtInt(selectionStats.done) + ' of ' + fmtInt(selectionStats.total),
+      detail:
+        fmtInt(selectionStats.failed) +
+        ' failed · ' +
+        fmtSeconds(elapsed) +
+        ' elapsed · ' +
+        (finished > 2 && remaining ? '~' + fmtSeconds(perItem * remaining) + ' left' : 'you can keep selecting'),
+      progress: { value: finished, max: Math.max(1, selectionStats.total) },
+      actions: selectionStop
+        ? []
+        : [{ label: 'Stop', kind: 'danger', onClick: () => (selectionStop = true) }],
+    });
+  }
+
+  function pumpSelectionDeletes() {
+    if (selectionWorker) return;
+    selectionWorker = true;
+    drainSelectionDeletes().finally(() => {
+      selectionWorker = false;
+      refreshSelectedButton();
+      if (pendingDelete.length && !selectionStop) pumpSelectionDeletes();
+    });
+  }
+
+  async function paceSelection(sent) {
+    if ((sent + 1) % Math.round(rand(settings.longPauseEveryMin, settings.longPauseEveryMax)) === 0) {
+      await sleep(rand(settings.longPauseMin, settings.longPauseMax));
+      return;
+    }
+    let wait = rand(settings.minDelay, settings.maxDelay);
+    if (Math.random() < 0.1) wait += rand(200, 900);
+    await sleep(wait);
+  }
+
+  async function drainSelectionDeletes() {
+    let sent = 0;
+    while (pendingDelete.length && !selectionStop) {
+      const id = pendingDelete.shift();
+      const saved = await archiveAsset({ assetId: id, name: 'asset' });
+      const res = saved.ok
+        ? await deleteWithRetry('asset', id, { ignoreStop: true })
+        : { ok: false, unsaved: saved.error };
+      queuedDeleteIds.delete(id);
+      if (res.ok) {
+        selectionStats.done += 1;
+        sent += 1;
+      } else {
+        selectionStats.failed += 1;
+        selectionStats.lastError = res.unsaved || (res.auth ? 'session expired' : 'HTTP ' + res.status);
+        hiddenIds.delete(id);
+      }
+      refreshSelectedButton();
+      renderSelectionToast();
+      if (pendingDelete.length && !selectionStop) await paceSelection(sent);
+    }
+    if (phase !== 'idle') return;
+    if (pendingDelete.length && !selectionStop) return;
+    const elapsed = Math.round((Date.now() - selectionStats.startedAt) / 1000);
+    const failed = selectionStats.failed;
+    const done = selectionStats.done;
+    showToast({
+      tone: selectionStop ? 'confirm' : failed ? 'error' : 'success',
+      title: selectionStop
+        ? 'Stopped at ' + done
+        : failed
+          ? 'Finished with ' + failed + ' failed'
+          : 'Deleted ' + plural(done, 'item', 'items'),
+      detail:
+        fmtInt(done) +
+        ' deleted · ' +
+        fmtInt(failed) +
+        ' failed · ' +
+        fmtSeconds(elapsed) +
+        (failed && selectionStats.lastError ? ' · ' + selectionStats.lastError : ''),
+      progress: { value: done + failed, max: Math.max(1, selectionStats.total) },
+      actions: [{ label: 'Close', onClick: hideToast }],
+    });
+    if (!pendingDelete.length) {
+      selectionStats.done = 0;
+      selectionStats.failed = 0;
+      selectionStats.total = 0;
+      selectionStats.startedAt = 0;
+      selectionStats.lastError = '';
+    }
   }
 
   function resetHeaderButton() {
@@ -1330,7 +1576,10 @@
       if (res.ok) {
         deleted += 1;
         if (saved.path) savedCount += 1;
-        if (entry.kind === 'asset') removeTileById(entry.id);
+        if (entry.kind === 'asset') {
+          removeTileById(entry.id);
+          selectedIds.delete(entry.id);
+        }
       } else {
         failed += 1;
         if (res.unsaved) {
@@ -1353,6 +1602,7 @@
     }
 
     phase = 'idle';
+    refreshSelectedButton();
     const elapsed = Math.round((Date.now() - startedAt) / 1000);
     if (btn) {
       btn.dataset.running = '0';
@@ -1388,7 +1638,14 @@
   // --------------------------------------------------------------- wiring
 
   function decorate() {
-    document.querySelectorAll(TILE_BTN).forEach(addGlyph);
+    document.querySelectorAll(TILE_BTN).forEach((btn) => {
+      const id = btn.getAttribute('data-library-item-id');
+      if (id && hiddenIds.has(id)) {
+        if (btn.parentElement) hideTile(btn.parentElement);
+        return;
+      }
+      addCheck(btn);
+    });
     ensureHeaderButton();
   }
 
