@@ -41,9 +41,15 @@ Chrome loads unpacked extensions from a folder, never from an archive, so the sa
 
 **Chats and projects.** Two removal types beyond the library, off by default. Chats are the sessions in the sidebar. Projects are what Grok stores as workspaces, and they are deleted through the same confirmed sweep. Neither has a size or a download step, because neither is a file. A chat that belongs to a project is left alone when you remove chats, so clearing sessions cannot gut a project. With a per-run cap set, the queue fills in the order the popup shows: chats, then projects, then library files.
 
+**Trash on a chat.** Each chat in the left sidebar has a trash icon. One click deletes that conversation. The title still opens the chat.
+
+**Select chats.** A checkbox on the left of each chat. **Delete selected** appears in the sidebar footer, above the account row, only while at least one chat is checked. It hides those rows and deletes them in the background, with the same progress toast and **Stop** button as a library run. Checking more chats and clicking again adds them to the queue. A chat that fails to delete can show up again the next time the list redraws.
+
 **Save first.** With **Save a copy before deleting** on, every asset is written to disk before its delete request is sent, and a matching `.md` holds the prompt plus model, mode, aspect ratio and dimensions. A file that fails to save is never deleted, so a bad path or a full disk cannot cost you an image.
 
 **Per-item delete.** A 26px trash glyph in the top-right corner of every tile. One click removes that asset. No menu, no dialog, and a toast in the bottom-right confirms which file went.
+
+**Select tiles.** A checkbox and an eye sit at the top-left of each tile. Clicking the image selects it and draws a red outline. The eye opens the item. **Delete selected**, next to **Delete all** in the library header, hides the checked tiles and deletes them in the background. Checking more tiles and clicking again adds them to the same queue. A tile that fails to delete can show up again the next time the library redraws.
 
 **Delete all from the popup.** The same button also lives in the settings popup, above Save, so you never have to be on the library page. It finds an open Grok tab and starts the run there; if none is open it opens the library first. The scan, the confirm and the progress bar all live in the tab, so the run keeps its toast and its Stop button where you can see them. If a run is already going in that tab, the popup says so instead of starting a second one.
 
@@ -116,7 +122,7 @@ The extension has no backend and no analytics. It talks to `grok.com` for the li
 
 ## Notes
 
-- The content script runs on every `grok.com` page, not just the library, because the popup can start a run from any Grok tab. On a page without a library grid it decorates nothing and adds no button.
+- The content script runs on every `grok.com` page, not just the library. Sidebar chat controls appear wherever the chat list is. Library tile controls appear on the library grid. The popup can start a bulk run from any Grok tab.
 - Deletion is permanent on Grok's side and there is no undo, for chats and projects as much as for images.
 - Deleting a project removes the project. What Grok does with the chats inside it is Grok's behaviour, and the extension does not know in advance.
 - Saving is opt in. Turn on **Save a copy before deleting**, click **Test download** once, open the folder, then start the purge.

@@ -66,6 +66,86 @@
   border-color: #d93a3f;
 }
 
+/* Sidebar chat rows. Checkbox on the left, trash just left of the ••• slot. */
+.glc-chat-row {
+  position: relative;
+}
+
+.glc-chat-row > button[draggable="true"] {
+  padding-inline-start: 30px !important;
+  padding-inline-end: 58px !important;
+}
+
+.glc-check.glc-chat-check {
+  position: absolute;
+  top: 50%;
+  inset-inline-start: 8px;
+  z-index: 41;
+  transform: translateY(-50%);
+}
+
+#app-sidebar footer:has(> .glc-chat-selected-btn) {
+  flex-direction: column;
+  align-items: stretch;
+  height: auto !important;
+}
+
+#app-sidebar footer:has(> .glc-chat-selected-btn) > :not(.glc-chat-selected-btn) {
+  flex: 0 0 auto;
+}
+
+.glc-chat-selected-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  flex: 0 0 auto;
+  height: 32px;
+  margin: 0 0 6px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.06);
+  color: #f2f2f4;
+  font: 500 12px/1 inherit;
+  letter-spacing: -0.2px;
+  cursor: pointer;
+}
+
+.glc-chat-selected-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.glc-glyph.glc-chat-delete {
+  position: absolute;
+  top: 50%;
+  inset-inline-end: 32px;
+  z-index: 40;
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  opacity: 0.9;
+  pointer-events: auto;
+  transform: translateY(-50%);
+  border-color: transparent;
+  background: #1a1a1e;
+  color: #f2f2f4;
+}
+
+.glc-chat-row:hover > .glc-chat-delete,
+.glc-glyph.glc-chat-delete[data-busy="1"] {
+  opacity: 1;
+}
+
+.glc-glyph.glc-chat-delete:hover {
+  background: #d93a3f !important;
+  border-color: #d93a3f;
+  color: #fff;
+  transform: translateY(-50%);
+}
+
+
 .glc-glyph[data-busy="1"] {
   opacity: 1;
   background: rgba(12, 12, 14, 0.85);

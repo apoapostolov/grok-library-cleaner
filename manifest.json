@@ -5,7 +5,8 @@
   "description": "Delete Grok library images in one click, or clear the whole library with a paced, confirmed sweep.",
   "permissions": [
     "storage",
-    "downloads"
+    "downloads",
+    "scripting"
   ],
   "host_permissions": [
     "https://grok.com/*",

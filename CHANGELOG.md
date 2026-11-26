@@ -2,12 +2,14 @@
 
 ## 1.2 — 2026-11-26
 
-Select tiles and delete them in the background, without waiting for the previous batch to finish.
+Select library tiles or sidebar chats and delete them in the background, without waiting for the previous batch to finish.
 
 ### Added
 
 - **Click a tile to select it.** A checkbox and an eye sit at the top-left of each tile. The image click toggles selection and draws a red outline. The eye opens the item. The trash icon stays at the top-right and still deletes that one tile immediately.
 - **Delete selected.** A header button next to **Delete all**. It hides the checked tiles immediately and deletes them in the background at the usual pace. The bottom toast shows the count, failures, elapsed time, a progress bar, and **Stop**. Checking more tiles and clicking **Delete selected** again appends those ids to the same queue, and the toast total grows with them. A tile that fails to delete is allowed back the next time the library redraws.
+- **Trash on sidebar chats.** Each chat under Chats in the left sidebar has a trash icon. One click deletes that conversation directly.
+- **Select chats.** A checkbox on the left of each chat. **Delete selected** appears in the sidebar footer, above the account row, only while chats are checked. It hides the checked rows and deletes them in the background, with the same progress toast and **Stop** button as the library. Checking more chats and clicking again appends them to the queue. A chat that fails to delete is allowed back the next time the list redraws.
 
 ## 1.1.1 — 2026-10-27
 
