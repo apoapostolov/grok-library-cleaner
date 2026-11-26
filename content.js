@@ -2,7 +2,6 @@
  * Grok Library Cleaner 1.0
  *
  * - Trash glyph on every library tile: one click deletes that asset immediately, no dialog.
- * - Trash glyph on every chat in the left sidebar: one click deletes that conversation.
  * - "Delete all" in the Library header: scans the library, shows what it found, then purges
  *   only the confirmed selection with human-paced, randomised spacing and a stop switch.
  * - Four selectable classes: plain images (image.jpg), edited images (edited-image.jpg),
@@ -68,6 +67,9 @@
   const queuedDeleteIds = new Set();
   let selectionWorker = false;
   let selectionStop = false;
+  let selectionAuthStopped = false;
+  let selectionAbort = null;
+  const busyIds = new Set(); // one owner per asset across tile, selected and bulk deletes
   const selectionStats = { done: 0, failed: 0, total: 0, startedAt: 0, lastError: '' };
   let armTimer = null;
   let toastEl = null;
@@ -76,6 +78,22 @@
 
   const rand = (min, max) => min + Math.random() * (max - min);
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  // A wait that returns early when a batch is stopped, without leaving a timer running.
+  const waitMs = (ms, stopped) => {
+    if (!stopped || !stopped()) return sleep(ms);
+    return new Promise((resolve) => {
+      const until = Date.now() + Math.max(0, ms);
+      const tick = () => {
+        if (stopped() || Date.now() >= until) {
+          resolve();
+          return;
+        }
+        setTimeout(tick, Math.min(100, until - Date.now()));
+      };
+      tick();
+    });
+  };
+  const selectionActive = () => selectionWorker || pendingDelete.length > 0;
   const num = (v, fallback, min, max) => {
     const n = Number(v);
     if (!Number.isFinite(n)) return fallback;
@@ -187,6 +205,10 @@
           reply({ ok: false, error: 'A run is already in progress in this tab.' });
           return;
         }
+        if (selectionActive()) {
+          reply({ ok: false, error: 'A background delete is already running in this tab.' });
+          return;
+        }
         startScan();
         reply({ ok: true });
       }
@@ -208,11 +230,21 @@
     return API_DELETE + '/' + key;
   }
 
-  async function deleteOnce(kind, id) {
-    const res = await fetch(deletePath(kind, id), {
-      method: 'DELETE',
-      credentials: 'include',
-    });
+  async function deleteOnce(kind, id, opts = {}) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 30000);
+    if (opts.onController) opts.onController(controller);
+    let res;
+    try {
+      res = await fetch(deletePath(kind, id), {
+        method: 'DELETE',
+        credentials: 'include',
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+      if (opts.onController) opts.onController(null);
+    }
     let body = null;
     try {
       body = await res.clone().json();
@@ -223,17 +255,25 @@
   }
 
   async function deleteWithRetry(kind, id, opts = {}) {
+    const stopped = () =>
+      (opts.ignoreStop ? false : stopRequested) || (opts.stopCheck ? opts.stopCheck() : false);
     let attempt = 0;
     while (attempt < 4) {
-      if (!opts.ignoreStop && stopRequested) return { stopped: true };
+      if (stopped()) return { stopped: true };
       let r;
       try {
-        r = await deleteOnce(kind, id);
+        r = await deleteOnce(kind, id, {
+          onController: (c) => {
+            if (opts.onController) opts.onController(c);
+          },
+        });
       } catch (e) {
-        await sleep(rand(1500, 3500) * Math.pow(1.6, attempt));
+        if (stopped()) return { stopped: true };
+        await waitMs(rand(1500, 3500) * Math.pow(1.6, attempt), stopped);
         attempt += 1;
         continue;
       }
+      if (stopped()) return { stopped: true };
       if (r.ok) return { ok: true };
       // 404 means the asset is already gone, which is the outcome we want.
       if (r.status === 404) return { ok: true, gone: true };
@@ -241,12 +281,12 @@
       if (r.status === 429) {
         const ra = parseFloat(r.retryAfter || '0');
         const wait = ra > 0 ? ra * 1000 : rand(18000, 32000) * Math.pow(1.5, attempt);
-        await sleep(Math.min(wait, 120000));
+        await waitMs(Math.min(wait, 120000), stopped);
         attempt += 1;
         continue;
       }
       if (r.status >= 500) {
-        await sleep(Math.min(rand(1800, 4500) * Math.pow(1.6, attempt), 60000));
+        await waitMs(Math.min(rand(1800, 4500) * Math.pow(1.6, attempt), 60000), stopped);
         attempt += 1;
         continue;
       }
@@ -738,12 +778,19 @@
   }
 
   async function assetMeta(id) {
-    const res = await fetch('/rest/assets/' + encodeURIComponent(id), {
-      credentials: 'include',
-      headers: { accept: 'application/json' },
-    });
-    if (!res.ok) throw new Error('metadata HTTP ' + res.status);
-    return res.json();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 30000);
+    try {
+      const res = await fetch('/rest/assets/' + encodeURIComponent(id), {
+        credentials: 'include',
+        headers: { accept: 'application/json' },
+        signal: controller.signal,
+      });
+      if (!res.ok) throw new Error('metadata HTTP ' + res.status);
+      return await res.json();
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /* Save a copy, then say whether the delete may proceed. */
@@ -827,10 +874,27 @@
     const id = tileButton.getAttribute('data-library-item-id');
     if (!id) return;
     const tile = tileButton.parentElement;
-    if (!tile || tile.querySelector(':scope > .glc-tools')) return;
+    if (!tile) return;
+
+    const existing = tile.querySelector(':scope > .glc-tools');
+    if (existing) {
+      if (existing.dataset.glcId === id) {
+        const box = existing.querySelector('.glc-check');
+        const on = selectedIds.has(id);
+        if (box) box.checked = on;
+        tile.classList.toggle('glc-picked', on);
+        addGlyph(tileButton);
+        return;
+      }
+      // Grok recycled this node for another asset. Drop controls bound to the old id.
+      existing.remove();
+      delete tileButton.dataset.glcSelect;
+      delete tileButton.dataset.glcView;
+    }
 
     const tools = document.createElement('div');
     tools.className = 'glc-tools';
+    tools.dataset.glcId = id;
 
     const box = document.createElement('input');
     box.type = 'checkbox';
@@ -851,7 +915,7 @@
     eye.className = 'glc-glyph glc-view';
     eye.title = 'View';
     eye.setAttribute('aria-label', 'View this item');
-    eye.innerHTML = EYE_SVG;
+    eye.innerHTML = EYE_SVG; // static constant
     eye.addEventListener(
       'click',
       (event) => {
@@ -890,13 +954,20 @@
     const id = tileButton.getAttribute('data-library-item-id');
     if (!id) return;
     const tile = tileButton.parentElement;
-    if (!tile || tile.querySelector(':scope > .glc-delete')) return;
+    if (!tile) return;
+
+    const existing = tile.querySelector(':scope > .glc-delete');
+    if (existing) {
+      if (existing.dataset.glcId === id) return;
+      existing.remove();
+    }
 
     const glyph = document.createElement('button');
     glyph.type = 'button';
     glyph.className = 'glc-glyph glc-delete';
     glyph.title = 'Delete (immediately)';
     glyph.setAttribute('aria-label', 'Delete this item');
+    glyph.dataset.glcId = id;
     glyph.innerHTML = TRASH_SVG; // static constant
 
     glyph.addEventListener(
@@ -905,39 +976,46 @@
         event.preventDefault();
         event.stopPropagation();
         if (glyph.dataset.busy === '1') return;
+        if (busyIds.has(id) || queuedDeleteIds.has(id)) {
+          flashError('Already queued', 'This item is in a delete job already.');
+          return;
+        }
         glyph.dataset.busy = '1';
+        busyIds.add(id);
+        try {
+          const saved = await archiveAsset({ assetId: id });
+          if (!saved.ok) {
+            glyph.dataset.error = '1';
+            setTimeout(() => {
+              delete glyph.dataset.error;
+            }, 700);
+            flashError('Not saved, not deleted', saved.error);
+            return;
+          }
 
-        const saved = await archiveAsset({ assetId: id });
-        if (!saved.ok) {
-          glyph.dataset.busy = '0';
+          const res = await deleteWithRetry('asset', id);
+          if (res.ok) {
+            const name = tileButton.getAttribute('aria-label') || 'item';
+            selectedIds.delete(id);
+            refreshSelectedButton();
+            hideTile(tile);
+            flashSuccess(
+              'Deleted ' + name,
+              saved.path ? 'Saved to ' + shortPath(saved.path) : res.gone ? 'It was already gone' : 'Removed'
+            );
+            return;
+          }
           glyph.dataset.error = '1';
           setTimeout(() => {
             delete glyph.dataset.error;
           }, 700);
-          flashError('Not saved, not deleted', saved.error);
-          return;
+          if (res.auth) flashError('Session expired', 'Sign in to Grok again, then reload.');
+          else if (res.stopped) flashError('Cancelled', 'Nothing else was deleted.');
+          else flashError('Delete failed', 'HTTP ' + res.status + ' for ' + id.slice(0, 8) + '…');
+        } finally {
+          busyIds.delete(id);
+          glyph.dataset.busy = '0';
         }
-
-        const res = await deleteWithRetry('asset', id);
-        if (res.ok) {
-          const name = tileButton.getAttribute('aria-label') || 'item';
-          selectedIds.delete(id);
-          refreshSelectedButton();
-          hideTile(tile);
-          flashSuccess(
-            'Deleted ' + name,
-            saved.path ? 'Saved to ' + shortPath(saved.path) : res.gone ? 'It was already gone' : 'Removed'
-          );
-          return;
-        }
-        glyph.dataset.busy = '0';
-        glyph.dataset.error = '1';
-        setTimeout(() => {
-          delete glyph.dataset.error;
-        }, 700);
-        if (res.auth) flashError('Session expired', 'Sign in to Grok again, then reload.');
-        else if (res.stopped) flashError('Cancelled', 'Nothing else was deleted.');
-        else flashError('Delete failed', 'HTTP ' + res.status + ' for ' + id.slice(0, 8) + '…');
       },
       true
     );
@@ -948,6 +1026,14 @@
   function hideTile(tile) {
     tile.classList.add('glc-hidden');
     setTimeout(() => tile.remove(), 220);
+  }
+
+  function showTileById(id) {
+    Array.from(document.querySelectorAll(TILE_BTN)).forEach((btn) => {
+      if (btn.getAttribute('data-library-item-id') === id && btn.parentElement) {
+        btn.parentElement.classList.remove('glc-hidden');
+      }
+    });
   }
 
   // ------------------------------------------------------- sidebar chats
@@ -1130,7 +1216,12 @@
       }
       refreshChatSelectedButton();
       renderChatSelectionToast();
-      if (pendingChatDelete.length && !chatStop) await paceSelection(sent);
+      if (pendingChatDelete.length && !chatStop) {
+        const stopped = () => chatStop;
+        let wait = rand(settings.minDelay, settings.maxDelay);
+        if (Math.random() < 0.1) wait += rand(200, 900);
+        await waitMs(wait, stopped);
+      }
     }
     if (phase !== 'idle') return;
     if (pendingChatDelete.length && !chatStop) return;
@@ -1331,12 +1422,17 @@
   function onDeleteSelected(event) {
     event.preventDefault();
     event.stopPropagation();
-    if (!selectedIds.size) {
-      flashError('Nothing selected', 'Check the boxes on the tiles you want to delete.');
+    if (phase !== 'idle') {
+      flashError('Delete all is running', 'Wait for that run to finish, then try again.');
+      return;
+    }
+    const picked = Array.from(selectedIds).filter((id) => !busyIds.has(id) && !queuedDeleteIds.has(id));
+    if (!picked.length) {
+      flashError('Already queued', 'Those items are in a delete job already.');
       return;
     }
     let added = 0;
-    for (const id of selectedIds) {
+    for (const id of picked) {
       hiddenIds.add(id);
       removeTileById(id);
       if (!queuedDeleteIds.has(id)) {
@@ -1351,6 +1447,7 @@
       selectionStats.total += added;
     }
     selectionStop = false;
+    selectionAuthStopped = false;
     refreshSelectedButton();
     renderSelectionToast();
     pumpSelectionDeletes();
@@ -1364,9 +1461,11 @@
     const perItem = finished > 0 ? elapsed / finished : 0;
     showToast({
       tone: 'busy',
-      title: selectionStop
-        ? 'Stopping…'
-        : 'Deleting ' + fmtInt(selectionStats.done) + ' of ' + fmtInt(selectionStats.total),
+      title: selectionAuthStopped
+        ? 'Stopped: session expired'
+        : selectionStop
+          ? 'Stopping…'
+          : 'Deleting ' + fmtInt(selectionStats.done) + ' of ' + fmtInt(selectionStats.total),
       detail:
         fmtInt(selectionStats.failed) +
         ' failed · ' +
@@ -1376,7 +1475,14 @@
       progress: { value: finished, max: Math.max(1, selectionStats.total) },
       actions: selectionStop
         ? []
-        : [{ label: 'Stop', kind: 'danger', onClick: () => (selectionStop = true) }],
+        : [{
+            label: 'Stop',
+            kind: 'danger',
+            onClick: () => {
+              selectionStop = true;
+              if (selectionAbort) selectionAbort.abort();
+            },
+          }],
     });
   }
 
@@ -1390,49 +1496,97 @@
     });
   }
 
-  async function paceSelection(sent) {
-    if ((sent + 1) % Math.round(rand(settings.longPauseEveryMin, settings.longPauseEveryMax)) === 0) {
-      await sleep(rand(settings.longPauseMin, settings.longPauseMax));
-      return;
+  function releasePendingSelection() {
+    while (pendingDelete.length) {
+      const id = pendingDelete.shift();
+      queuedDeleteIds.delete(id);
+      hiddenIds.delete(id);
+      showTileById(id);
+      selectionStats.total = Math.max(selectionStats.done + selectionStats.failed, selectionStats.total - 1);
+    }
+  }
+
+  async function paceSelection(processed, nextLongAt) {
+    const stopped = () => selectionStop || selectionAuthStopped;
+    if (processed % nextLongAt === 0) {
+      await waitMs(rand(settings.longPauseMin, settings.longPauseMax), stopped);
+      return processed + Math.round(rand(settings.longPauseEveryMin, settings.longPauseEveryMax));
     }
     let wait = rand(settings.minDelay, settings.maxDelay);
     if (Math.random() < 0.1) wait += rand(200, 900);
-    await sleep(wait);
+    await waitMs(wait, stopped);
+    return nextLongAt;
   }
 
   async function drainSelectionDeletes() {
-    let sent = 0;
-    while (pendingDelete.length && !selectionStop) {
+    let processed = 0;
+    let nextLongAt = Math.round(rand(settings.longPauseEveryMin, settings.longPauseEveryMax));
+
+    while (pendingDelete.length && !selectionStop && !selectionAuthStopped) {
       const id = pendingDelete.shift();
-      const saved = await archiveAsset({ assetId: id, name: 'asset' });
-      const res = saved.ok
-        ? await deleteWithRetry('asset', id, { ignoreStop: true })
-        : { ok: false, unsaved: saved.error };
-      queuedDeleteIds.delete(id);
+      if (busyIds.has(id)) {
+        queuedDeleteIds.delete(id);
+        hiddenIds.delete(id);
+        showTileById(id);
+        selectionStats.total = Math.max(selectionStats.done + selectionStats.failed, selectionStats.total - 1);
+        continue;
+      }
+      busyIds.add(id);
+      let res;
+      try {
+        const saved = await archiveAsset({ assetId: id, name: 'asset' });
+        if (selectionStop) {
+          res = { stopped: true };
+        } else if (!saved.ok) {
+          res = { ok: false, unsaved: saved.error };
+        } else {
+          res = await deleteWithRetry('asset', id, {
+            ignoreStop: true,
+            stopCheck: () => selectionStop,
+            onController: (c) => {
+              selectionAbort = c;
+            },
+          });
+        }
+      } finally {
+        busyIds.delete(id);
+        selectionAbort = null;
+        queuedDeleteIds.delete(id);
+      }
+      processed += 1;
+      if (res.stopped) break;
+      if (res.auth) {
+        selectionAuthStopped = true;
+        break;
+      }
       if (res.ok) {
         selectionStats.done += 1;
-        sent += 1;
       } else {
         selectionStats.failed += 1;
-        selectionStats.lastError = res.unsaved || (res.auth ? 'session expired' : 'HTTP ' + res.status);
         hiddenIds.delete(id);
+        showTileById(id);
+        selectionStats.lastError = res.unsaved || 'HTTP ' + res.status;
       }
       refreshSelectedButton();
       renderSelectionToast();
-      if (pendingDelete.length && !selectionStop) await paceSelection(sent);
+      if (pendingDelete.length && !selectionStop && !selectionAuthStopped) {
+        nextLongAt = await paceSelection(processed, nextLongAt);
+      }
     }
-    if (phase !== 'idle') return;
-    if (pendingDelete.length && !selectionStop) return;
+
+    releasePendingSelection();
     const elapsed = Math.round((Date.now() - selectionStats.startedAt) / 1000);
     const failed = selectionStats.failed;
     const done = selectionStats.done;
     showToast({
-      tone: selectionStop ? 'confirm' : failed ? 'error' : 'success',
-      title: selectionStop
-        ? 'Stopped at ' + done
-        : failed
-          ? 'Finished with ' + failed + ' failed'
-          : 'Deleted ' + plural(done, 'item', 'items'),
+      tone: selectionAuthStopped || failed ? 'error' : selectionStop ? 'confirm' : 'success',
+      title: selectionAuthStopped
+        ? 'Stopped: session expired'
+        : selectionStop
+          ? 'Stopped at ' + done
+          : failed
+            ? 'Finished with ' + failed + ' failed'
+            : 'Deleted ' + plural(done, 'item', 'items'),
       detail:
         fmtInt(done) +
         ' deleted · ' +
@@ -1443,13 +1597,12 @@
       progress: { value: done + failed, max: Math.max(1, selectionStats.total) },
       actions: [{ label: 'Close', onClick: hideToast }],
     });
-    if (!pendingDelete.length) {
-      selectionStats.done = 0;
-      selectionStats.failed = 0;
-      selectionStats.total = 0;
-      selectionStats.startedAt = 0;
-      selectionStats.lastError = '';
-    }
+    selectionStats.done = 0;
+    selectionStats.failed = 0;
+    selectionStats.total = 0;
+    selectionStats.startedAt = 0;
+    selectionStats.lastError = '';
+    selectionAuthStopped = false;
   }
 
   function resetHeaderButton() {
@@ -1638,6 +1791,10 @@
 
   async function startScan() {
     if (phase !== 'idle') return;
+    if (selectionActive()) {
+      flashError('Background delete running', 'Wait for the selected batch to finish before starting Delete all.');
+      return;
+    }
     if (!anyTypeSelected()) {
       flashError('Nothing selected', 'Turn on chats, projects, images, videos or files in the popup.');
       return;
@@ -1875,6 +2032,9 @@
     let lastUnsaved = '';
     let authStopped = false;
     const total = queue.length;
+    // Claim every queued asset up front so a tile click cannot archive it twice.
+    const claimedIds = new Set(queue.filter((e) => e.kind === 'asset').map((e) => e.id));
+    claimedIds.forEach((id) => busyIds.add(id));
 
     const stopAction = { label: 'Stop', kind: 'danger', onClick: () => (stopRequested = true) };
 
@@ -1906,6 +2066,7 @@
     for (let i = 0; i < queue.length; i += 1) {
       if (stopRequested) break;
       const entry = queue[i];
+      if (entry.kind === 'asset' && busyIds.has(entry.id) && !claimedIds.has(entry.id)) continue;
       const saved = entry.kind === 'asset' ? await archiveAsset(entry.asset) : { ok: true, skipped: true };
       const res = saved.ok ? await deleteWithRetry(entry.kind, entry.id) : { ok: false, unsaved: saved.error };
 
@@ -1942,6 +2103,7 @@
       }
     }
 
+    claimedIds.forEach((id) => busyIds.delete(id));
     phase = 'idle';
     refreshSelectedButton();
     const elapsed = Math.round((Date.now() - startedAt) / 1000);

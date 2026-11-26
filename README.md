@@ -9,7 +9,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/type-chrome_extension-4285F4" alt="Type: Chrome extension">
   <img src="https://img.shields.io/badge/manifest-v3-1f6feb" alt="Manifest V3">
-  <img src="https://img.shields.io/badge/version-1.1.1-2fbf71" alt="Version 1.1.1">
+  <img src="https://img.shields.io/badge/version-1.1.2-2fbf71" alt="Version 1.1.2">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-97ca00" alt="License: MIT"></a>
 </p>
 
@@ -49,9 +49,9 @@ Chrome loads unpacked extensions from a folder, never from an archive, so the sa
 
 **Per-item delete.** A 26px trash glyph in the top-right corner of every tile. One click removes that asset. No menu, no dialog, and a toast in the bottom-right confirms which file went.
 
-**Select tiles.** A checkbox and an eye sit at the top-left of each tile. Clicking the image selects it and draws a red outline. The eye opens the item. **Delete selected**, next to **Delete all** in the library header, hides the checked tiles and deletes them in the background. Checking more tiles and clicking again adds them to the same queue. A tile that fails to delete can show up again the next time the library redraws.
+**Select a few.** Click a tile to check it, then use **Delete selected** in the header. The checked tiles disappear at once while the deletes run in the background at the usual pace, with a live count and a Stop button. You can keep selecting while it works and send another batch to the same queue. Stopping brings back anything that had not been deleted yet.
 
-**Delete all from the popup.** The same button also lives in the settings popup, above Save, so you never have to be on the library page. It finds an open Grok tab and starts the run there; if none is open it opens the library first. The scan, the confirm and the progress bar all live in the tab, so the run keeps its toast and its Stop button where you can see them. If a run is already going in that tab, the popup says so instead of starting a second one.
+**Delete all from the popup.** The same button also lives in the settings popup, above Save, so you never have to be on the library page. It finds an open Grok tab and starts the run there; if none is open it opens the library first. The scan, the confirm and the progress bar all live in the tab, so the run keeps its toast and its Stop button where you can see them. If a run or a background selected batch is already going in that tab, the popup says so instead of starting a second one.
 
 **Delete all.** Two clicks to arm, then a scan of the whole library and a confirm toast showing the queue size and per-class breakdown. Nothing is deleted until you press **Delete N**. During the run the toast carries a live progress bar with the count, failures, elapsed time and ETA, plus a **Stop** button. Every run can be stopped between items.
 
