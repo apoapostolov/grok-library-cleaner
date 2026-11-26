@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.2.0 — 2026-11-27
+
+Sidebar chats get their own trash button and a background delete queue. Thanks to @luciotato for the proposal and the first implementation of these controls.
+
+### Added
+
+- **Trash on sidebar chats.** Each chat under Chats in the left sidebar has a trash icon. One click deletes that conversation directly, and the toast confirms which chat went. The title still opens the chat.
+- **Select chats.** A checkbox on the left of each chat. **Delete selected** appears in the sidebar footer, above the account row, only while chats are checked. It hides the checked rows and deletes them in the background, with the same progress toast and **Stop** button as the library. Checking more chats and clicking again appends them to the queue. A chat that fails to delete is allowed back the next time the list redraws.
+
+### Changed
+
+- Chrome shows one new permission when you reload the extension. It lets the sidebar controls tell which chat each row is, and it applies only on grok.com.
+
+### Fixed
+
+- The trash button and the checkbox act on the chat you clicked, even when you click two rows quickly or Grok redraws the sidebar while you work.
+- When Grok reuses a row for another chat, a checkbox tick on the old chat clears with it.
+
 ## 1.1.2 — 2026-11-26
 
 Select tiles and delete them in the background, without waiting for the previous batch to finish.

@@ -14,14 +14,23 @@ const TIMEOUT_MS = 10 * 60 * 1000;
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (!msg) return false;
-  const known = msg.type === 'glc-save' || msg.type === 'glc-selftest' || msg.type === 'glc-run-all';
+  const known =
+    msg.type === 'glc-save' ||
+    msg.type === 'glc-selftest' ||
+    msg.type === 'glc-run-all' ||
+    msg.type === 'glc-chat-id' ||
+    msg.type === 'glc-stamp-chats';
   if (!known) return false;
   const work =
     msg.type === 'glc-run-all'
       ? startRunInGrokTab()
       : msg.type === 'glc-selftest'
         ? selfTest(msg)
-        : saveAsset(msg);
+        : msg.type === 'glc-chat-id'
+          ? chatIdInTab(_sender && _sender.tab && _sender.tab.id, msg.token)
+          : msg.type === 'glc-stamp-chats'
+            ? stampChatsInTab(_sender && _sender.tab && _sender.tab.id)
+            : saveAsset(msg);
   work
     .then((res) => sendResponse(res))
     .catch((err) => sendResponse({ ok: false, error: String((err && err.message) || err) }));
@@ -37,6 +46,115 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
  * --------------------------------------------------------------------- */
 
 const GROK_ORIGIN = 'https://grok.com/';
+
+/* The conversation id lives on the row's React props, not in the DOM. */
+function readTargetChatId(token) {
+  // One token per lookup: two concurrent clicks must never share a row.
+  if (!/^glc-chat-\d+$/.test(String(token || ''))) return '';
+  const wrap = document.querySelector('[data-glc-chat-target="' + token + '"]');
+  const btn = wrap && wrap.querySelector('button[draggable="true"]');
+  if (!btn) return '';
+  const names = Object.getOwnPropertyNames(btn);
+  let fiber = null;
+  for (let i = 0; i < names.length; i += 1) {
+    if (names[i].indexOf('__reactFiber') === 0) {
+      fiber = btn[names[i]];
+      break;
+    }
+  }
+  for (let i = 0; i < 24 && fiber; i += 1) {
+    const props = fiber.memoizedProps;
+    if (props && props.conversation && props.conversation.conversationId) {
+      return String(props.conversation.conversationId);
+    }
+    if (
+      props &&
+      props.drag &&
+      props.drag.type === 'application/x-grok-conversation-id' &&
+      props.drag.data
+    ) {
+      return String(props.drag.data);
+    }
+    fiber = fiber.return;
+  }
+  return '';
+}
+
+function chatIdInTab(tabId, token) {
+  if (!tabId) return Promise.resolve({ id: '' });
+  return chrome.scripting
+    .executeScript({
+      target: { tabId },
+      world: 'MAIN',
+      func: readTargetChatId,
+      args: [token],
+    })
+    .then((injected) => ({ id: (injected && injected[0] && injected[0].result) || '' }));
+}
+
+/* Writes each visible chat's id onto its row so a checkbox can select it. */
+function stampVisibleChatIds() {
+  function idFrom(btn) {
+    const names = Object.getOwnPropertyNames(btn);
+    let fiber = null;
+    for (let i = 0; i < names.length; i += 1) {
+      if (names[i].indexOf('__reactFiber') === 0) {
+        fiber = btn[names[i]];
+        break;
+      }
+    }
+    for (let i = 0; i < 24 && fiber; i += 1) {
+      const props = fiber.memoizedProps;
+      if (props && props.conversation && props.conversation.conversationId) {
+        return String(props.conversation.conversationId);
+      }
+      if (
+        props &&
+        props.drag &&
+        props.drag.type === 'application/x-grok-conversation-id' &&
+        props.drag.data
+      ) {
+        return String(props.drag.data);
+      }
+      fiber = fiber.return;
+    }
+    return '';
+  }
+  const rows = document.querySelectorAll(
+    '#app-sidebar [data-reorder-item="recent"] button[draggable="true"]'
+  );
+  let stamped = 0;
+  rows.forEach((btn) => {
+    if (!btn.querySelector('[data-sidebar-item-label]')) return;
+    const wrap = btn.parentElement;
+    if (!wrap) return;
+    // Grok reuses rows for other chats, so a stamped id from the previous chat
+    // must be replaced. An unreadable id clears the old one instead of leaving
+    // a stale target that could authorise the wrong delete.
+    const id = idFrom(btn);
+    if (id) {
+      if (wrap.dataset.glcConversationId !== id) {
+        wrap.dataset.glcConversationId = id;
+        stamped += 1;
+      }
+    } else if (wrap.dataset.glcConversationId) {
+      delete wrap.dataset.glcConversationId;
+      stamped += 1;
+    }
+  });
+  return stamped;
+}
+
+function stampChatsInTab(tabId) {
+  if (!tabId) return Promise.resolve({ stamped: 0 });
+  return chrome.scripting
+    .executeScript({
+      target: { tabId },
+      world: 'MAIN',
+      func: stampVisibleChatIds,
+    })
+    .then((injected) => ({ stamped: (injected && injected[0] && injected[0].result) || 0 }));
+}
 
 async function findGrokTab() {
   const tabs = await chrome.tabs.query({ url: 'https://grok.com/*' });

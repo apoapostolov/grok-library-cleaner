@@ -55,6 +55,16 @@
   let stopRequested = false;
   const selectedIds = new Set();
   const hiddenIds = new Set();
+  const hiddenChatIds = new Set();
+  const selectedChatIds = new Set();
+  const pendingChatDelete = [];
+  const queuedChatIds = new Set();
+  let chatWorker = false;
+  let chatStop = false;
+  let chatStampTask = null;
+  let chatToken = 0;
+  const chatRowIds = new WeakMap();
+  const chatStats = { done: 0, failed: 0, total: 0, startedAt: 0, lastError: '' };
   const pendingDelete = [];
   const queuedDeleteIds = new Set();
   let selectionWorker = false;
@@ -1028,6 +1038,361 @@
     });
   }
 
+  // ------------------------------------------------------- sidebar chats
+
+  // Chat rows are draggable buttons under Chats. The id is on the React props,
+  // so the click asks the page world for it and then calls the conversation delete.
+
+  function chatLabel(label) {
+    const raw = (label.textContent || '').replace(/\s+/g, ' ').trim();
+    if (!raw) return 'chat';
+    return raw.length > 60 ? raw.slice(0, 59).trimEnd() + '…' : raw;
+  }
+
+  function hideChatRow(item) {
+    item.classList.add('glc-hidden');
+    setTimeout(() => item.remove(), 220);
+  }
+
+  function chatSelectionLabel() {
+    const n = selectedChatIds.size;
+    return n ? 'Delete selected (' + fmtInt(n) + ')' : 'Delete selected';
+  }
+
+  function refreshChatSelectedButton() {
+    const existing = document.querySelector('#app-sidebar .glc-chat-selected-btn');
+    if (!selectedChatIds.size) {
+      if (existing) existing.remove();
+      return;
+    }
+    const footer = document.querySelector('#app-sidebar footer');
+    if (!footer) return;
+    let btn = existing;
+    if (!btn) {
+      btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'glc-chat-selected-btn';
+      btn.addEventListener('click', onDeleteSelectedChats, true);
+    }
+    if (footer.firstElementChild !== btn) footer.insertBefore(btn, footer.firstElementChild);
+    const waiting = pendingChatDelete.length + (chatWorker ? 1 : 0);
+    btn.textContent = chatSelectionLabel();
+    btn.title = waiting
+      ? 'Deleting ' + fmtInt(waiting) + ' in the background. Checked chats are sent on the next click.'
+      : 'Hide the checked chats and delete them in the background';
+  }
+
+  function setChatSelected(id, on, item, box) {
+    if (!id) return;
+    if (on) selectedChatIds.add(id);
+    else selectedChatIds.delete(id);
+    if (box) box.checked = on;
+    if (item) item.classList.toggle('glc-picked', on);
+    refreshChatSelectedButton();
+  }
+
+  function syncChatCheck(item) {
+    const id = item.dataset.glcConversationId || '';
+    const box = item.querySelector(':scope > .glc-chat-check');
+    const on = !!(id && selectedChatIds.has(id));
+    if (box && box.dataset.busy !== '1') box.checked = on;
+    item.classList.toggle('glc-picked', on);
+  }
+
+  function addChatCheck(item) {
+    let box = item.querySelector(':scope > .glc-chat-check');
+    if (box) {
+      syncChatCheck(item);
+      return;
+    }
+    box = document.createElement('input');
+    box.type = 'checkbox';
+    box.className = 'glc-check glc-chat-check';
+    box.title = 'Select for deletion';
+    box.setAttribute('aria-label', 'Select this chat');
+    const keepRow = (event) => {
+      event.stopPropagation();
+    };
+    box.addEventListener('pointerdown', keepRow, true);
+    box.addEventListener('mousedown', keepRow, true);
+    box.addEventListener('click', keepRow, true);
+    box.addEventListener('change', async () => {
+      box.dataset.busy = '1';
+      // Fresh lookup at click time; the stamped id can belong to the previous chat.
+      const id = await conversationIdOf(item);
+      delete box.dataset.busy;
+      if (!id) {
+        box.checked = false;
+        item.classList.remove('glc-picked');
+        flashError('Could not select that chat', 'This row has no conversation id.');
+        return;
+      }
+      setChatSelected(id, box.checked, item, box);
+    });
+    item.appendChild(box);
+    syncChatCheck(item);
+  }
+
+  function ensureChatSelectedButton() {
+    refreshChatSelectedButton();
+  }
+
+  function removeChatById(id) {
+    document.querySelectorAll('#app-sidebar [data-reorder-item="recent"] .glc-chat-row').forEach((item) => {
+      if (item.dataset.glcConversationId === id) hideChatRow(item);
+    });
+  }
+
+  function onDeleteSelectedChats(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!selectedChatIds.size) {
+      flashError('Nothing selected', 'Check the boxes on the chats you want to delete.');
+      return;
+    }
+    let added = 0;
+    for (const id of selectedChatIds) {
+      hiddenChatIds.add(id);
+      removeChatById(id);
+      if (!queuedChatIds.has(id)) {
+        queuedChatIds.add(id);
+        pendingChatDelete.push(id);
+        added += 1;
+      }
+    }
+    selectedChatIds.clear();
+    if (added) {
+      if (!chatStats.total) chatStats.startedAt = Date.now();
+      chatStats.total += added;
+    }
+    chatStop = false;
+    refreshChatSelectedButton();
+    renderChatSelectionToast();
+    pumpChatDeletes();
+  }
+
+  function renderChatSelectionToast() {
+    if (phase !== 'idle') return;
+    const finished = chatStats.done + chatStats.failed;
+    const elapsed = chatStats.startedAt ? (Date.now() - chatStats.startedAt) / 1000 : 0;
+    const remaining = Math.max(0, chatStats.total - finished);
+    const perItem = finished > 0 ? elapsed / finished : 0;
+    showToast({
+      tone: 'busy',
+      title: chatStop
+        ? 'Stopping…'
+        : 'Deleting ' + fmtInt(chatStats.done) + ' of ' + fmtInt(chatStats.total),
+      detail:
+        fmtInt(chatStats.failed) +
+        ' failed · ' +
+        fmtSeconds(elapsed) +
+        ' elapsed · ' +
+        (finished > 2 && remaining ? '~' + fmtSeconds(perItem * remaining) + ' left' : 'you can keep selecting'),
+      progress: { value: finished, max: Math.max(1, chatStats.total) },
+      actions: chatStop ? [] : [{ label: 'Stop', kind: 'danger', onClick: () => (chatStop = true) }],
+    });
+  }
+
+  function pumpChatDeletes() {
+    if (chatWorker) return;
+    chatWorker = true;
+    drainChatDeletes().finally(() => {
+      chatWorker = false;
+      refreshChatSelectedButton();
+      if (pendingChatDelete.length && !chatStop) pumpChatDeletes();
+    });
+  }
+
+  async function drainChatDeletes() {
+    let sent = 0;
+    while (pendingChatDelete.length && !chatStop) {
+      const id = pendingChatDelete.shift();
+      const res = await deleteWithRetry('conversation', id, { ignoreStop: true });
+      queuedChatIds.delete(id);
+      if (res.ok) {
+        chatStats.done += 1;
+        sent += 1;
+      } else {
+        chatStats.failed += 1;
+        chatStats.lastError = res.auth ? 'session expired' : 'HTTP ' + res.status;
+        hiddenChatIds.delete(id);
+      }
+      refreshChatSelectedButton();
+      renderChatSelectionToast();
+      if (pendingChatDelete.length && !chatStop) {
+        const stopped = () => chatStop;
+        let wait = rand(settings.minDelay, settings.maxDelay);
+        if (Math.random() < 0.1) wait += rand(200, 900);
+        await waitMs(wait, stopped);
+      }
+    }
+    if (phase !== 'idle') return;
+    if (pendingChatDelete.length && !chatStop) return;
+    const elapsed = Math.round((Date.now() - chatStats.startedAt) / 1000);
+    const failed = chatStats.failed;
+    const done = chatStats.done;
+    showToast({
+      tone: chatStop ? 'confirm' : failed ? 'error' : 'success',
+      title: chatStop
+        ? 'Stopped at ' + done
+        : failed
+          ? 'Finished with ' + failed + ' failed'
+          : 'Deleted ' + plural(done, 'chat', 'chats'),
+      detail:
+        fmtInt(done) +
+        ' deleted · ' +
+        fmtInt(failed) +
+        ' failed · ' +
+        fmtSeconds(elapsed) +
+        (failed && chatStats.lastError ? ' · ' + chatStats.lastError : ''),
+      progress: { value: done + failed, max: Math.max(1, chatStats.total) },
+      actions: [{ label: 'Close', onClick: hideToast }],
+    });
+    if (!pendingChatDelete.length) {
+      chatStats.done = 0;
+      chatStats.failed = 0;
+      chatStats.total = 0;
+      chatStats.startedAt = 0;
+      chatStats.lastError = '';
+    }
+  }
+
+  function addChatTrash(item, label) {
+    item.classList.add('glc-chat-row');
+    let btn = item.querySelector(':scope > .glc-chat-delete');
+    if (btn) return;
+
+    btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'glc-glyph glc-chat-delete';
+    btn.title = 'Delete this chat';
+    btn.setAttribute('aria-label', 'Delete this chat');
+    btn.innerHTML = TRASH_SVG;
+
+    const keepRow = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    for (const type of ['pointerdown', 'mousedown', 'mouseup', 'dblclick']) {
+      btn.addEventListener(type, keepRow, true);
+    }
+
+    btn.addEventListener(
+      'click',
+      async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (btn.dataset.busy === '1') return;
+        btn.dataset.busy = '1';
+        const name = chatLabel(label);
+        const chatId = await conversationIdOf(item);
+        if (!chatId) {
+          btn.dataset.busy = '0';
+          btn.dataset.error = '1';
+          setTimeout(() => {
+            delete btn.dataset.error;
+          }, 700);
+          flashError('Could not delete that chat', 'This row has no conversation id.');
+          return;
+        }
+        const res = await deleteWithRetry('conversation', chatId, { ignoreStop: true });
+        if (res.ok) {
+          hiddenChatIds.add(chatId);
+          hideChatRow(item);
+          const here =
+            location.pathname === '/c/' + chatId || location.pathname.startsWith('/c/' + chatId + '/');
+          flashSuccess('Deleted ' + name, res.gone ? 'It was already gone' : 'Removed from your chats');
+          if (here) setTimeout(() => location.assign('/'), 450);
+          return;
+        }
+        btn.dataset.busy = '0';
+        btn.dataset.error = '1';
+        setTimeout(() => {
+          delete btn.dataset.error;
+        }, 700);
+        if (res.auth) flashError('Session expired', 'Sign in to Grok again, then reload.');
+        else flashError('Could not delete that chat', 'HTTP ' + res.status);
+      },
+      true
+    );
+
+    item.appendChild(btn);
+  }
+
+  function conversationIdOf(item) {
+    // Read at click time under a unique token. The stamped id is only a
+    // decoration hint: Grok can reuse the row before the page is restamped.
+    chatToken += 1;
+    const token = 'glc-chat-' + chatToken;
+    item.setAttribute('data-glc-chat-target', token);
+    return chrome.runtime
+      .sendMessage({ type: 'glc-chat-id', token })
+      .then((res) => {
+        const id = (res && res.id) || '';
+        if (id) {
+          item.dataset.glcConversationId = id;
+          chatRowIds.set(item, id);
+        }
+        return id;
+      })
+      .catch(() => '')
+      .finally(() => {
+        if (item.getAttribute('data-glc-chat-target') === token) {
+          item.removeAttribute('data-glc-chat-target');
+        }
+      });
+  }
+
+  function chatsMissingIds(root) {
+    return [...root.querySelectorAll('button[draggable="true"]')].some((chatBtn) => {
+      const label = chatBtn.querySelector('[data-sidebar-item-label]');
+      const item = chatBtn.parentElement;
+      return label && item && root.contains(item) && !item.dataset.glcConversationId;
+    });
+  }
+
+  function ensureChatIds(root) {
+    if (!chatsMissingIds(root)) return Promise.resolve();
+    if (chatStampTask) return chatStampTask;
+    chatStampTask = chrome.runtime
+      .sendMessage({ type: 'glc-stamp-chats' })
+      .catch(() => {})
+      .finally(() => {
+        chatStampTask = null;
+      });
+    chatStampTask.then((res) => {
+      if (res && res.stamped) decorateChats();
+    });
+    return chatStampTask;
+  }
+
+  function decorateChats() {
+    const root = document.querySelector('#app-sidebar [data-reorder-item="recent"]');
+    if (!root) return;
+    ensureChatSelectedButton();
+    if (chatsMissingIds(root)) ensureChatIds(root);
+    root.querySelectorAll('button[draggable="true"]').forEach((chatBtn) => {
+      const label = chatBtn.querySelector('[data-sidebar-item-label]');
+      if (!label) return;
+      const item = chatBtn.parentElement;
+      if (!item || !root.contains(item)) return;
+      const id = item.dataset.glcConversationId || '';
+      const previous = chatRowIds.get(item);
+      if (previous && previous !== id && selectedChatIds.has(previous)) {
+        // The row names a different chat now: drop the old selection with it.
+        selectedChatIds.delete(previous);
+        refreshChatSelectedButton();
+      }
+      chatRowIds.set(item, id);
+      if (id && hiddenChatIds.has(id)) {
+        if (!item.classList.contains('glc-hidden')) hideChatRow(item);
+        return;
+      }
+      addChatCheck(item);
+      addChatTrash(item, label);
+    });
+  }
+
   function removeTileById(id) {
     document.querySelectorAll(TILE_BTN + '[data-library-item-id="' + id + '"]').forEach((btn) => {
       if (btn.parentElement) hideTile(btn.parentElement);
@@ -1805,6 +2170,7 @@
       addCheck(btn);
     });
     ensureHeaderButton();
+    decorateChats();
   }
 
   let scheduled = false;
